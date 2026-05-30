@@ -1,0 +1,213 @@
+package view
+
+import (
+	"github.com/Adyn-Cox/CoorsHeavy/internal/auth"
+	"github.com/Adyn-Cox/CoorsHeavy/internal/store"
+)
+
+// PlayerRow is one row in the lineup. The hidden "item" input carries the
+// player ID so a drag-reorder POSTs the IDs in their new order. Admins see a
+// drag handle, a position dropdown, and a clickable attendance badge; the public
+// sees the same data read-only — with Bench/Absent hidden.
+templ PlayerRow(idx int, p store.Player) {
+	<div
+		id={ "player-" + itoa(p.ID) }
+		class="flex items-center gap-3 border border-white bg-black px-3 py-2"
+	>
+		if auth.IsAdmin(ctx) {
+			if idx >= 0 {
+				<span class="drag-handle cursor-move select-none text-lg leading-none" title="Drag to reorder">⠿</span>
+			} else {
+				<span class="w-5"></span>
+			}
+		}
+		if idx >= 0 {
+			<input type="hidden" name="item" value={ itoa(p.ID) }/>
+			<span class="w-6 text-right font-mono text-sm">{ itoa(int64(idx + 1)) }</span>
+		} else {
+			<span class="w-6"></span>
+		}
+		<span class="flex-1 font-semibold">{ p.Name }</span>
+		if auth.IsAdmin(ctx) {
+			<select
+				name={ "pos_" + itoa(p.ID) }
+				class="border border-coors-red bg-black px-2 py-1 text-sm text-white"
+			>
+				for _, pos := range store.Positions {
+					<option value={ pos } selected?={ pos == p.Position }>{ displayPosition(pos) }</option>
+				}
+			</select>
+		} else {
+			<span class="border border-coors-red bg-black px-2 py-1 text-center text-sm font-mono text-white">{ displayPosition(p.Position) }</span>
+		}
+		@AttendanceBadge(p)
+	</div>
+}
+
+// AttendanceBadge shows Here/Absent. For admins it is a button that toggles
+// attendance and swaps itself with the updated badge. The public only ever sees
+// "Here" (Absent is hidden from public view).
+templ AttendanceBadge(p store.Player) {
+	if auth.IsAdmin(ctx) {
+		<button
+			id={ "att-" + itoa(p.ID) }
+			hx-post={ "/players/" + itoa(p.ID) + "/attendance" }
+			hx-swap="outerHTML"
+			class={ attBadgeClass(p.Attended) + " cursor-pointer" }
+		>
+			{ attLabel(p.Attended) }
+		</button>
+	} else if p.Attended {
+		<span id={ "att-" + itoa(p.ID) } class={ attBadgeClass(true) }>{ attLabel(true) }</span>
+	}
+}
+
+// BeerRow is one player's beer progress bar (racks out of 2). Admins get a
+// dropdown to set the amount, which swaps the whole row with the updated bar.
+templ BeerRow(p store.Player) {
+	<div id={ "beer-" + itoa(p.ID) } class="border border-white bg-black p-3">
+		<div class="mb-1 flex items-baseline justify-between">
+			<span class="font-semibold">{ p.Name }</span>
+			<span class="font-mono text-sm">{ racksLabel(p.BeerRacks) } / 2 racks</span>
+		</div>
+		<div class="h-5 w-full border border-white bg-black">
+			<div class="h-full bg-coors-red" style={ barWidth(p.BeerRacks) }></div>
+		</div>
+		if auth.IsAdmin(ctx) {
+			<div class="mt-2 flex items-center gap-2 text-sm">
+				<label class="uppercase tracking-wide">Racks:</label>
+				<select
+					name="racks"
+					hx-post={ "/players/" + itoa(p.ID) + "/beer" }
+					hx-target={ "#beer-" + itoa(p.ID) }
+					hx-swap="outerHTML"
+					class="border border-white bg-black px-2 py-1 text-white"
+				>
+					for _, v := range rackOptions() {
+						<option value={ racksLabel(v) } selected?={ v == p.BeerRacks }>{ racksLabel(v) }</option>
+					}
+				</select>
+			</div>
+		}
+	</div>
+}
+
+// ScoreCell is the schedule table's result cell. Admins get an inline editor
+// (our score vs theirs, Save, and Clear once played); the public sees the result.
+templ ScoreCell(g store.Game) {
+	<td id={ "score-" + itoa(g.ID) } class="border border-white px-3 py-2 whitespace-nowrap">
+		if auth.IsAdmin(ctx) {
+			<form
+				hx-post={ "/games/" + itoa(g.ID) + "/score" }
+				hx-target={ "#score-" + itoa(g.ID) }
+				hx-swap="outerHTML"
+				class="flex items-center gap-1"
+			>
+				<input
+					type="number"
+					name="us"
+					value={ scoreVal(g, true) }
+					placeholder="us"
+					class="w-12 border border-white bg-black px-1 py-0.5 text-center text-white"
+					aria-label="Coors Heavy score"
+				/>
+				<span>-</span>
+				<input
+					type="number"
+					name="them"
+					value={ scoreVal(g, false) }
+					placeholder="opp"
+					class="w-12 border border-white bg-black px-1 py-0.5 text-center text-white"
+					aria-label="Opponent score"
+				/>
+				<button type="submit" class="border border-white bg-white px-2 py-0.5 text-xs uppercase text-black hover:bg-black hover:text-white">
+					Save
+				</button>
+				if g.Played {
+					<span class="ml-1 font-bold">{ g.Result() }</span>
+					<button type="submit" name="clear" value="1" class="ml-1 border border-white px-2 py-0.5 text-xs uppercase hover:bg-white hover:text-black">
+						Clear
+					</button>
+				}
+			</form>
+		} else {
+			if g.Played {
+				<span class="font-bold">{ g.Result() }</span>
+			} else {
+				<span class="text-gray-400">—</span>
+			}
+		}
+	</td>
+}
+
+// DonatedBadge shows whether a donation was made; clickable toggle for admins.
+templ DonatedBadge(d store.Donation) {
+	if auth.IsAdmin(ctx) {
+		<button
+			id={ "donated-" + itoa(d.ID) }
+			hx-post={ "/donations/" + itoa(d.ID) + "/toggle" }
+			hx-swap="outerHTML"
+			class={ badgeClass(d.Donated) + " cursor-pointer" }
+		>
+			{ donatedLabel(d.Donated) }
+		</button>
+	} else {
+		<span id={ "donated-" + itoa(d.ID) } class={ badgeClass(d.Donated) }>{ donatedLabel(d.Donated) }</span>
+	}
+}
+
+// DonationRow is a single donation entry; admins can toggle it or remove it.
+templ DonationRow(d store.Donation) {
+	<div id={ "donation-" + itoa(d.ID) } class="flex items-center justify-between gap-3 border border-white bg-black px-3 py-2">
+		<div class="min-w-0">
+			<div class="font-semibold">{ d.Name }</div>
+			if d.Description != "" {
+				<div class="text-sm text-gray-400">{ d.Description }</div>
+			}
+		</div>
+		<div class="flex shrink-0 items-center gap-2">
+			@DonatedBadge(d)
+			if auth.IsAdmin(ctx) {
+				<button
+					hx-post={ "/donations/" + itoa(d.ID) + "/delete" }
+					hx-target={ "#donation-" + itoa(d.ID) }
+					hx-swap="outerHTML"
+					class="border border-white px-2 py-1 text-xs uppercase hover:bg-white hover:text-black"
+				>
+					Remove
+				</button>
+			}
+		</div>
+	</div>
+}
+
+// AddDonationForm lets the admin add a new donation; the new row is appended.
+templ AddDonationForm() {
+	<form
+		hx-post="/donations"
+		hx-target="#donations"
+		hx-swap="beforeend"
+		hx-on::after-request="this.reset()"
+		class="mb-4 flex flex-wrap items-center gap-2 border border-white bg-black p-3"
+	>
+		<input
+			type="text"
+			name="name"
+			required
+			placeholder="Who"
+			class="flex-1 border border-white bg-black px-2 py-1 text-white"
+		/>
+		<input
+			type="text"
+			name="description"
+			placeholder="What they donated"
+			class="flex-1 border border-white bg-black px-2 py-1 text-white"
+		/>
+		<label class="flex items-center gap-1 text-sm uppercase tracking-wide">
+			<input type="checkbox" name="donated" value="true"/> Donated
+		</label>
+		<button type="submit" class="border border-white bg-white px-3 py-1 font-semibold text-black hover:bg-black hover:text-white">
+			Add
+		</button>
+	</form>
+}

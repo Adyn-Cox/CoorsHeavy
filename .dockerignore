@@ -1,0 +1,9 @@
+.git
+.github
+bin
+tmp
+data
+*.db
+.air.toml
+README.md
+.gitignore

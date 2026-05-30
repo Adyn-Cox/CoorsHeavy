@@ -1,0 +1,15 @@
+# Live-reload config for `air`. Regenerates templ output and rebuilds on change.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "templ generate && go build -o ./tmp/web ./cmd/web"
+  bin = "./tmp/web"
+  include_ext = ["go", "templ", "css", "sql"]
+  exclude_dir = ["tmp", "data", "bin"]
+  exclude_regex = ["_templ.go$"]
+  delay = 200
+  stop_on_error = true
+
+[misc]
+  clean_on_exit = true

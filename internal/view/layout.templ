@@ -1,0 +1,64 @@
+package view
+
+import "github.com/Adyn-Cox/CoorsHeavy/internal/auth"
+
+// Layout is the black background / white text shell shared by every page: header
+// with softball logo + nav + login state, then page content. Loads HTMX,
+// Tailwind, and SortableJS.
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title } · Coors Heavy</title>
+			<link rel="icon" href="/static/logo.webp" type="image/webp"/>
+			<script src="https://unpkg.com/htmx.org@2.0.3"></script>
+			<script src="https://cdn.tailwindcss.com"></script>
+			<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
+			<link rel="stylesheet" href="/static/app.css"/>
+		</head>
+		<body class="min-h-screen bg-black text-white">
+			<header class="border-b-2 border-white">
+				<div class="mx-auto flex max-w-4xl items-center justify-between gap-4 px-4 py-3">
+					<a href="/" class="flex items-center gap-3">
+						<img
+							src="/static/logo.webp"
+							alt="Coors Heavy"
+							class="h-14 w-14 object-contain"
+						/>
+						<span class="text-xl font-black uppercase tracking-widest">Coors Heavy</span>
+					</a>
+					<nav class="flex items-center gap-4 text-sm font-semibold uppercase tracking-wide">
+						<a href="/lineup" class="hover:underline">Lineup</a>
+						<a href="/schedule" class="hover:underline">Schedule</a>
+						<a href="/beer" class="hover:underline">Beer</a>
+						if auth.IsAdmin(ctx) {
+							<form method="post" action="/logout">
+								<button type="submit" class="border border-white bg-white px-2 py-1 text-black hover:bg-black hover:text-white">
+									Log out
+								</button>
+							</form>
+						} else {
+							<a href="/login" class="border border-white px-2 py-1 hover:bg-white hover:text-black">
+								Admin
+							</a>
+						}
+					</nav>
+				</div>
+			</header>
+			<main class="mx-auto max-w-4xl px-4 py-8">
+				{ children... }
+			</main>
+			<script>
+				// Initialise drag-and-drop on any .sortable container (admin lineup).
+				htmx.onLoad(function (content) {
+					content.querySelectorAll('.sortable').forEach(function (el) {
+						if (el._sortable) return;
+						el._sortable = new Sortable(el, { animation: 150, handle: '.drag-handle' });
+					});
+				});
+			</script>
+		</body>
+	</html>
+}

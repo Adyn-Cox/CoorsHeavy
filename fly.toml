@@ -1,0 +1,30 @@
+# Fly.io configuration. Run `fly launch --no-deploy` once to create the app and
+# adjust the name/region, then `fly deploy`. See README for the full walkthrough.
+
+app = "coorsheavy"
+primary_region = "den"  # change to a region near you: https://fly.io/docs/reference/regions/
+
+[build]
+
+[env]
+  PORT = "8080"
+  DB_PATH = "/data/coorsheavy.db"
+  ENV = "production"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # Keep at most ONE machine: a SQLite file on a volume is single-writer.
+  min_machines_running = 0
+
+# Persistent volume so the SQLite database survives restarts/deploys.
+# Create it once with: fly volumes create coorsheavy_data --region den --size 1
+[[mounts]]
+  source = "coorsheavy_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

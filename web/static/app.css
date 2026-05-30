@@ -1,0 +1,20 @@
+/* Fallback styling (also applied if the Tailwind CDN fails to load).
+   The site theme is black background, white text. */
+html,
+body {
+  background-color: #000;
+  color: #fff;
+}
+
+/* Coors brand colors */
+:root {
+  --coors-red:  #C2112F;
+  --coors-blue: #0071CE;
+}
+
+.border-coors-red  { border-color: var(--coors-red); }
+.border-coors-blue { border-color: var(--coors-blue); }
+.bg-coors-red      { background-color: var(--coors-red); }
+.bg-coors-blue     { background-color: var(--coors-blue); }
+.text-coors-red    { color: var(--coors-red); }
+.text-coors-blue   { color: var(--coors-blue); }

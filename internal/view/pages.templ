@@ -1,0 +1,179 @@
+package view
+
+import (
+	"github.com/Adyn-Cox/CoorsHeavy/internal/auth"
+	"github.com/Adyn-Cox/CoorsHeavy/internal/store"
+)
+
+// Home is the landing page: logo + quick links to the three sections.
+templ Home() {
+	@Layout("Home") {
+		<div class="text-center">
+			<img
+				src="/static/logo.svg"
+				alt="Coors Heavy softball"
+				class="mx-auto mb-6 h-40 w-40 object-contain"
+			/>
+			<h1 class="mb-2 text-4xl font-black uppercase tracking-widest">Coors Heavy</h1>
+			<p class="mb-8 text-gray-400">Team lineup, schedule, and beer tracker.</p>
+		</div>
+		<div class="grid gap-4 sm:grid-cols-3">
+			@homeCard("Lineup", "Set the batting order, positions, and who showed up.", "/lineup")
+			@homeCard("Schedule", "Upcoming and past games.", "/schedule")
+			@homeCard("Beer", "Who brought their racks — and who donated.", "/beer")
+		</div>
+	}
+}
+
+templ homeCard(title, desc, href string) {
+	<a href={ templ.SafeURL(href) } class="block border-2 border-white p-6 transition hover:bg-white hover:text-black">
+		<div class="mb-1 text-xl font-bold uppercase tracking-wide">{ title }</div>
+		<div class="text-sm">{ desc }</div>
+	</a>
+}
+
+// Lineup shows the roster split into present and absent players.
+// Admins get drag-to-reorder, position dropdowns, attendance toggles, and a Save button.
+// The public sees a read-only batting order with an absent section below the divider.
+templ Lineup(present, absent []store.Player) {
+	@Layout("Lineup") {
+		<h1 class="mb-2 text-3xl font-black uppercase tracking-widest">Lineup</h1>
+		if auth.IsAdmin(ctx) {
+			<p class="mb-4 text-sm text-gray-400">Drag ⠿ to set batting order. Set positions and attendance, then click Save Lineup.</p>
+			<form id="lineup-form" method="post" action="/lineup/save">
+				<div class="sortable space-y-2">
+					for i, p := range present {
+						@PlayerRow(i, p)
+					}
+				</div>
+				<div class="my-5 flex items-center gap-3">
+					<div class="h-px flex-1 bg-white opacity-30"></div>
+					<span class="text-xs font-semibold uppercase tracking-widest text-gray-500">Absent</span>
+					<div class="h-px flex-1 bg-white opacity-30"></div>
+				</div>
+				<div class="space-y-2 opacity-50">
+					for _, p := range absent {
+						@PlayerRow(-1, p)
+					}
+				</div>
+				<div class="mt-6">
+					<button type="submit" class="border border-white bg-white px-6 py-2 font-bold uppercase tracking-wide text-black hover:bg-black hover:text-white">
+						Save Lineup
+					</button>
+				</div>
+			</form>
+		} else {
+			<p class="mb-4 text-sm text-gray-400">Batting order and field positions. <a href="/login" class="underline">Log in</a> to edit.</p>
+			<div class="space-y-2">
+				for i, p := range present {
+					@PlayerRow(i, p)
+				}
+			</div>
+			if len(absent) > 0 {
+				<div class="my-5 flex items-center gap-3">
+					<div class="h-px flex-1 bg-white opacity-30"></div>
+					<span class="text-xs font-semibold uppercase tracking-widest text-gray-500">Absent</span>
+					<div class="h-px flex-1 bg-white opacity-30"></div>
+				</div>
+				<div class="space-y-2 opacity-50">
+					for _, p := range absent {
+						@PlayerRow(-1, p)
+					}
+				</div>
+			}
+		}
+	}
+}
+
+// Schedule lists Coors Heavy's games (Thursday Men's E Rec D2, Stazio #2).
+templ Schedule(games []store.Game) {
+	@Layout("Schedule") {
+		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">Schedule</h1>
+		<p class="mb-4 text-sm text-gray-400">Coors Heavy · Thursday Men's E Rec D2 · Stazio #2</p>
+		if len(games) == 0 {
+			<p class="text-gray-400">No games yet. Run <code>make import-schedule</code> to load them.</p>
+		} else {
+			<div class="overflow-x-auto">
+				<table class="w-full border-collapse border border-white text-left">
+					<thead>
+						<tr class="bg-white text-black">
+							<th class="border border-white px-3 py-2">Date</th>
+							<th class="border border-white px-3 py-2">Time</th>
+							<th class="border border-white px-3 py-2">Matchup</th>
+							<th class="border border-white px-3 py-2">Location</th>
+							<th class="border border-white px-3 py-2">Result</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, g := range games {
+							<tr>
+								<td class="border border-white px-3 py-2 whitespace-nowrap">{ g.Date }</td>
+								<td class="border border-white px-3 py-2 whitespace-nowrap">{ g.Time }</td>
+								<td class="border border-white px-3 py-2 font-semibold">{ matchup(g) }</td>
+								<td class="border border-white px-3 py-2 whitespace-nowrap">{ g.Location }</td>
+								@ScoreCell(g)
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+			<div class="mt-6 space-y-1 border-l-4 border-white pl-3 text-sm text-gray-400">
+				<p><span class="font-semibold uppercase">Week 8</span> — Independence Day tournament, no league game (bye).</p>
+				<p><span class="font-semibold uppercase">Playoffs</span> — Round 1: Thu 7/30 · Championship Round: Thu 8/6 · all at Stazio #2. Matchups set by final seed.</p>
+			</div>
+		}
+	}
+}
+
+// Beer shows each player's progress toward 2 racks, then the donations list.
+templ Beer(players []store.Player, donations []store.Donation) {
+	@Layout("Beer") {
+		<h1 class="mb-2 text-3xl font-black uppercase tracking-widest">Beer</h1>
+		<p class="mb-4 text-sm text-gray-400">Goal: 2 thirty-racks per player.</p>
+		<div class="grid gap-3 sm:grid-cols-2">
+			for _, p := range players {
+				@BeerRow(p)
+			}
+		</div>
+
+		<h2 class="mb-2 mt-10 text-2xl font-black uppercase tracking-widest">Donations</h2>
+		if auth.IsAdmin(ctx) {
+			@AddDonationForm()
+		}
+		<div id="donations" class="space-y-2">
+			for _, d := range donations {
+				@DonationRow(d)
+			}
+		</div>
+		if len(donations) == 0 && !auth.IsAdmin(ctx) {
+			<p class="text-gray-400">No donations recorded yet.</p>
+		}
+	}
+}
+
+// Login is the admin sign-in form (standard POST, not HTMX).
+templ Login(errMsg string) {
+	@Layout("Login") {
+		<div class="mx-auto max-w-sm">
+			<h1 class="mb-4 text-3xl font-black uppercase tracking-widest">Admin Login</h1>
+			if errMsg != "" {
+				<div class="mb-4 border-2 border-white bg-white px-3 py-2 text-sm font-semibold text-black">
+					{ errMsg }
+				</div>
+			}
+			<form method="post" action="/login" class="space-y-3">
+				<div>
+					<label class="block text-sm font-semibold uppercase tracking-wide">Username</label>
+					<input type="text" name="username" required autofocus class="w-full border border-white bg-black px-3 py-2 text-white"/>
+				</div>
+				<div>
+					<label class="block text-sm font-semibold uppercase tracking-wide">Password</label>
+					<input type="password" name="password" required class="w-full border border-white bg-black px-3 py-2 text-white"/>
+				</div>
+				<button type="submit" class="w-full border border-white bg-white px-3 py-2 font-bold uppercase tracking-wide text-black hover:bg-black hover:text-white">
+					Log in
+				</button>
+			</form>
+		</div>
+	}
+}

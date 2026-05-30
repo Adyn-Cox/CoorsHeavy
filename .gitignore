@@ -1,0 +1,16 @@
+# Binaries & build output
+/bin/
+/tmp/
+
+# Local SQLite databases
+*.db
+*.db-shm
+*.db-wal
+/data/
+
+# Env files
+.env
+.env.local
+
+# OS / editor cruft
+.DS_Store

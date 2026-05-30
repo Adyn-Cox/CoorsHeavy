@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Softball">
+  <circle cx="50" cy="50" r="46" fill="#ffffff" stroke="#111111" stroke-width="2"/>
+  <g fill="none" stroke="#111111" stroke-width="2.5" stroke-linecap="round">
+    <path d="M30 12 C 42 34, 42 66, 30 88"/>
+    <path d="M70 12 C 58 34, 58 66, 70 88"/>
+    <path d="M33 22 l7 -2 M35 34 l7 -2 M36 47 l7 -1 M36 59 l7 1 M35 71 l7 2 M33 81 l7 2"/>
+    <path d="M67 22 l-7 -2 M65 34 l-7 -2 M64 47 l-7 -1 M64 59 l-7 1 M65 71 l-7 2 M67 81 l-7 2"/>
+  </g>
+</svg>
