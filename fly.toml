@@ -2,7 +2,7 @@
 # adjust the name/region, then `fly deploy`. See README for the full walkthrough.
 
 app = "coorsheavy"
-primary_region = "den"  # change to a region near you: https://fly.io/docs/reference/regions/
+primary_region = "dfw"
 
 [build]
 

@@ -13,7 +13,7 @@ var seedRoster = []string{
 // Weeks 1–3 are played; admins can edit/record scores from the schedule page.
 var seedGames = []Game{
 	{SortOrder: 1, Date: "Thu 5/14", Time: "7:00 PM", Opponent: "Hailraisers", Home: false, Location: "Stazio #2", Played: true, UsScore: 13, ThemScore: 12},
-	{SortOrder: 2, Date: "Thu 5/21", Time: "8:00 PM", Opponent: "Big Sticks", Home: false, Location: "Stazio #2", Played: true, UsScore: 3, ThemScore: 13},
+	{SortOrder: 2, Date: "Thu 5/21", Time: "8:00 PM", Opponent: "Big Sticks", Home: false, Location: "Stazio #2", Played: true, UsScore: 5, ThemScore: 13},
 	{SortOrder: 3, Date: "Thu 5/28", Time: "7:00 PM", Opponent: "The Slo Leftovers", Home: true, Location: "Stazio #2", Played: true, UsScore: 6, ThemScore: 5},
 	{SortOrder: 4, Date: "Thu 6/4", Time: "6:00 PM", Opponent: "The Benchwarmers", Home: false, Location: "Stazio #2"},
 	{SortOrder: 5, Date: "Thu 6/11", Time: "6:00 PM", Opponent: "The MasterBatters", Home: false, Location: "Stazio #2"},

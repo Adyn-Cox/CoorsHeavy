@@ -63,7 +63,6 @@ templ Lineup(present, absent []store.Player) {
 				</div>
 			</form>
 		} else {
-			<p class="mb-4 text-sm text-gray-400">Batting order and field positions. <a href="/login" class="underline">Log in</a> to edit.</p>
 			<div class="space-y-2">
 				for i, p := range present {
 					@PlayerRow(i, p)
@@ -100,7 +99,6 @@ templ Schedule(games []store.Game) {
 							<th class="border border-white px-3 py-2">Date</th>
 							<th class="border border-white px-3 py-2">Time</th>
 							<th class="border border-white px-3 py-2">Matchup</th>
-							<th class="border border-white px-3 py-2">Location</th>
 							<th class="border border-white px-3 py-2">Result</th>
 						</tr>
 					</thead>
@@ -110,7 +108,6 @@ templ Schedule(games []store.Game) {
 								<td class="border border-white px-3 py-2 whitespace-nowrap">{ g.Date }</td>
 								<td class="border border-white px-3 py-2 whitespace-nowrap">{ g.Time }</td>
 								<td class="border border-white px-3 py-2 font-semibold">{ matchup(g) }</td>
-								<td class="border border-white px-3 py-2 whitespace-nowrap">{ g.Location }</td>
 								@ScoreCell(g)
 							</tr>
 						}
