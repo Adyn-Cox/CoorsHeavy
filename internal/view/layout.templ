@@ -59,6 +59,17 @@ templ Layout(title string) {
 					});
 				});
 			</script>
+			<!-- Song search modal -->
+			<div id="song-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.85)" onclick="if(event.target===this)closeSongModal()">
+				<div id="song-modal-inner" class="w-full max-w-md border-2 border-white bg-black p-6 mx-4"></div>
+			</div>
+			<script>
+				function openSongModal() { document.getElementById('song-modal').classList.remove('hidden'); }
+				function closeSongModal() {
+					document.getElementById('song-modal').classList.add('hidden');
+					document.getElementById('song-modal-inner').innerHTML = '';
+				}
+			</script>
 		</body>
 	</html>
 }

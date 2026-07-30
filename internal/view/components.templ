@@ -2,6 +2,7 @@ package view
 
 import (
 	"github.com/Adyn-Cox/CoorsHeavy/internal/auth"
+	"github.com/Adyn-Cox/CoorsHeavy/internal/spotify"
 	"github.com/Adyn-Cox/CoorsHeavy/internal/store"
 )
 
@@ -9,38 +10,44 @@ import (
 // player ID so a drag-reorder POSTs the IDs in their new order. Admins see a
 // drag handle, a position dropdown, and a clickable attendance badge; the public
 // sees the same data read-only — with Bench/Absent hidden.
-templ PlayerRow(idx int, p store.Player) {
+templ PlayerRow(idx int, pws store.PlayerWithSongs, spotifyEnabled bool) {
 	<div
-		id={ "player-" + itoa(p.ID) }
-		class="flex items-center gap-3 border border-white bg-black px-3 py-2"
+		id={ "player-" + itoa(pws.ID) }
+		class="border border-white bg-black px-3 py-2"
 	>
-		if auth.IsAdmin(ctx) {
-			if idx >= 0 {
-				<span class="drag-handle cursor-move select-none text-lg leading-none" title="Drag to reorder">⠿</span>
-			} else {
-				<span class="w-5"></span>
-			}
-		}
-		if idx >= 0 {
-			<input type="hidden" name="item" value={ itoa(p.ID) }/>
-			<span class="w-6 text-right font-mono text-sm">{ itoa(int64(idx + 1)) }</span>
-		} else {
-			<span class="w-6"></span>
-		}
-		<span class="flex-1 font-semibold">{ p.Name }</span>
-		if auth.IsAdmin(ctx) {
-			<select
-				name={ "pos_" + itoa(p.ID) }
-				class="border border-coors-red bg-black px-2 py-1 text-sm text-white"
-			>
-				for _, pos := range store.Positions {
-					<option value={ pos } selected?={ pos == p.Position }>{ displayPosition(pos) }</option>
+		<div class="flex items-center gap-3">
+			if auth.IsAdmin(ctx) {
+				if idx >= 0 {
+					<span class="drag-handle cursor-move select-none text-lg leading-none" title="Drag to reorder">⠿</span>
+				} else {
+					<span class="w-5"></span>
 				}
-			</select>
-		} else {
-			<span class="border border-coors-red bg-black px-2 py-1 text-center text-sm font-mono text-white">{ displayPosition(p.Position) }</span>
-		}
-		@AttendanceBadge(p)
+			}
+			if idx >= 0 {
+				<input type="hidden" name="item" value={ itoa(pws.ID) }/>
+				<span class="w-6 text-right font-mono text-sm">{ itoa(int64(idx + 1)) }</span>
+			} else {
+				<span class="w-6"></span>
+			}
+			<span class="flex-1 font-semibold">{ pws.Name }</span>
+			if auth.IsAdmin(ctx) {
+				<select
+					name={ "pos_" + itoa(pws.ID) }
+					class="border border-coors-red bg-black px-2 py-1 text-sm text-white"
+				>
+					for _, pos := range store.Positions {
+						<option value={ pos } selected?={ pos == pws.Position }>{ displayPosition(pos) }</option>
+					}
+				</select>
+			} else {
+				<span class="border border-coors-red bg-black px-2 py-1 text-center text-sm font-mono text-white">{ displayPosition(pws.Position) }</span>
+			}
+			@AttendanceBadge(pws.Player)
+		</div>
+		<div class="mt-2 space-y-1 pl-5">
+			@SongSlot(pws.ID, 1, pws.Song1)
+			@SongSlot(pws.ID, 2, pws.Song2)
+		</div>
 	</div>
 }
 
@@ -90,6 +97,60 @@ templ BeerRow(p store.Player) {
 			</div>
 		}
 	</div>
+}
+
+// GameRow is one row of the schedule table. Playoff games show a badge and,
+// for admins, swap the time and matchup cells for dropdowns — seeding isn't
+// known in advance, so the start time (6/7/8 PM) and opponent are editable.
+// Each <select> posts on change and swaps this whole row back in.
+templ GameRow(g store.Game, opponents []string) {
+	<tr id={ "game-" + itoa(g.ID) }>
+		<td class="border border-white px-3 py-2 whitespace-nowrap">
+			{ g.Date }
+			if g.Playoff {
+				<span class="ml-2 border border-white px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide">Playoff</span>
+			}
+		</td>
+		<td class="border border-white px-3 py-2 whitespace-nowrap">
+			if g.Playoff && auth.IsAdmin(ctx) {
+				<select
+					name="time"
+					hx-post={ "/games/" + itoa(g.ID) + "/matchup" }
+					hx-target={ "#game-" + itoa(g.ID) }
+					hx-swap="outerHTML"
+					class="border border-white bg-black px-1 py-0.5 text-white"
+					aria-label="Start time"
+				>
+					for _, t := range store.GameTimes {
+						<option value={ t } selected?={ t == g.Time }>{ t }</option>
+					}
+				</select>
+			} else {
+				{ g.Time }
+			}
+		</td>
+		<td class="border border-white px-3 py-2 font-semibold">
+			if g.Playoff && auth.IsAdmin(ctx) {
+				<span class="mr-1">{ homeAway(g) }</span>
+				<select
+					name="opponent"
+					hx-post={ "/games/" + itoa(g.ID) + "/matchup" }
+					hx-target={ "#game-" + itoa(g.ID) }
+					hx-swap="outerHTML"
+					class="border border-white bg-black px-1 py-0.5 text-white"
+					aria-label="Opponent"
+				>
+					<option value={ store.TBDOpponent } selected?={ g.Opponent == store.TBDOpponent }>{ store.TBDOpponent }</option>
+					for _, o := range opponents {
+						<option value={ o } selected?={ o == g.Opponent }>{ o }</option>
+					}
+				</select>
+			} else {
+				{ matchup(g) }
+			}
+		</td>
+		@ScoreCell(g)
+	</tr>
 }
 
 // ScoreCell is the schedule table's result cell. Admins get an inline editor
@@ -179,6 +240,93 @@ templ DonationRow(d store.Donation) {
 			}
 		</div>
 	</div>
+}
+
+// SongSlot renders one walk-up song slot. Shows a button that opens the search
+// modal. The outer div is the HTMX outerHTML swap target.
+templ SongSlot(playerID int64, slot int, song *store.PlayerSong) {
+	<div id={ "song-slot-" + itoa(playerID) + "-" + slotStr(slot) } class="flex items-center gap-2 text-sm">
+		<span class="text-xs font-semibold uppercase tracking-wide text-gray-500 w-12 shrink-0">{ slotLabel(slot) }:</span>
+		if song != nil {
+			<span class="flex-1 text-gray-200">{ song.TrackName } — { song.ArtistName }</span>
+			<button
+				type="button"
+				hx-get={ "/songs/search-modal?player_id=" + itoa(playerID) + "&slot=" + slotStr(slot) }
+				hx-target="#song-modal-inner"
+				hx-swap="innerHTML"
+				hx-on::after-request="openSongModal()"
+				class="text-xs text-gray-500 hover:text-white uppercase tracking-wide"
+			>Change</button>
+			<button
+				type="button"
+				hx-delete={ "/players/" + itoa(playerID) + "/songs/" + slotStr(slot) }
+				hx-target={ "#song-slot-" + itoa(playerID) + "-" + slotStr(slot) }
+				hx-swap="outerHTML"
+				class="text-xs text-gray-500 hover:text-white"
+			>✕</button>
+		} else {
+			<button
+				type="button"
+				hx-get={ "/songs/search-modal?player_id=" + itoa(playerID) + "&slot=" + slotStr(slot) }
+				hx-target="#song-modal-inner"
+				hx-swap="innerHTML"
+				hx-on::after-request="openSongModal()"
+				class="text-xs text-gray-400 hover:text-white border border-gray-600 hover:border-white px-2 py-0.5 uppercase tracking-wide"
+			>+ Add</button>
+		}
+	</div>
+}
+
+// SongSearchModal is the content rendered inside the song search modal.
+templ SongSearchModal(playerName string, playerID int64, slot int) {
+	<div>
+		<div class="mb-4 flex items-center justify-between">
+			<h2 class="font-bold uppercase tracking-wide">{ slotLabel(slot) } — { playerName }</h2>
+			<button type="button" onclick="closeSongModal()" class="text-gray-400 hover:text-white text-xl leading-none">✕</button>
+		</div>
+		<input
+			type="text"
+			name="q"
+			placeholder="Search Spotify…"
+			autocomplete="off"
+			autofocus
+			hx-get={ "/search/tracks?player_id=" + itoa(playerID) + "&slot=" + slotStr(slot) }
+			hx-trigger="keyup changed delay:300ms"
+			hx-target="#modal-results"
+			class="w-full border border-white bg-black px-3 py-2 text-white placeholder-gray-500 focus:outline-none"
+		/>
+		<div id="modal-results" class="mt-1 max-h-64 overflow-y-auto"></div>
+	</div>
+}
+
+// TrackSearchResults is the HTMX fragment returned by GET /search/tracks.
+// Rendered inside the song search modal — no absolute positioning needed.
+templ TrackSearchResults(tracks []spotify.Track, playerID int64, slot int) {
+	for _, t := range tracks {
+		<button
+			type="button"
+			hx-post={ "/players/" + itoa(playerID) + "/songs/" + slotStr(slot) }
+			hx-vals={ trackValsJSON(t.ID, t.Name, t.ArtistName) }
+			hx-target={ "#song-slot-" + itoa(playerID) + "-" + slotStr(slot) }
+			hx-swap="outerHTML"
+			hx-on::after-request="if(!event.detail.failed)closeSongModal()"
+			class="block w-full border-b border-gray-800 px-3 py-3 text-left hover:bg-white hover:text-black"
+		>
+			<div class="font-semibold">{ t.Name }</div>
+			<div class="text-sm text-gray-400">{ t.ArtistName }</div>
+		</button>
+	}
+}
+
+// SyncResult is swapped into the sync status area after a playlist sync attempt.
+templ SyncResult(ok bool, count int, errMsg string) {
+	<span id="sync-result" class="text-sm">
+		if ok {
+			<span class="text-green-400">✓ Synced { slotStr(count) } tracks to Spotify</span>
+		} else if errMsg != "" {
+			<span class="text-red-400">✗ { errMsg }</span>
+		}
+	</span>
 }
 
 // AddDonationForm lets the admin add a new donation; the new row is appended.

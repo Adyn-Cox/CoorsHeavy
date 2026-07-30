@@ -70,7 +70,7 @@ func Layout(title string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</main><script>\n\t\t\t\t// Initialise drag-and-drop on any .sortable container (admin lineup).\n\t\t\t\thtmx.onLoad(function (content) {\n\t\t\t\t\tcontent.querySelectorAll('.sortable').forEach(function (el) {\n\t\t\t\t\t\tif (el._sortable) return;\n\t\t\t\t\t\tel._sortable = new Sortable(el, { animation: 150, handle: '.drag-handle' });\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t</script></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</main><script>\n\t\t\t\t// Initialise drag-and-drop on any .sortable container (admin lineup).\n\t\t\t\thtmx.onLoad(function (content) {\n\t\t\t\t\tcontent.querySelectorAll('.sortable').forEach(function (el) {\n\t\t\t\t\t\tif (el._sortable) return;\n\t\t\t\t\t\tel._sortable = new Sortable(el, { animation: 150, handle: '.drag-handle' });\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t</script><!-- Song search modal --><div id=\"song-modal\" class=\"hidden fixed inset-0 z-50 flex items-center justify-center\" style=\"background:rgba(0,0,0,0.85)\" onclick=\"if(event.target===this)closeSongModal()\"><div id=\"song-modal-inner\" class=\"w-full max-w-md border-2 border-white bg-black p-6 mx-4\"></div></div><script>\n\t\t\t\tfunction openSongModal() { document.getElementById('song-modal').classList.remove('hidden'); }\n\t\t\t\tfunction closeSongModal() {\n\t\t\t\t\tdocument.getElementById('song-modal').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('song-modal-inner').innerHTML = '';\n\t\t\t\t}\n\t\t\t</script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -11,11 +11,15 @@ RUN go mod download
 COPY . .
 # Generated *_templ.go files are committed, so we only need `go build` here.
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/web ./cmd/web
+# Shipped alongside the server so the schedule can be reloaded on the live
+# volume with: fly ssh console -C /app/import-schedule
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/import-schedule ./cmd/import-schedule
 
 # --- Run stage: tiny distroless image --------------------------------------
 FROM gcr.io/distroless/static-debian12 AS run
 WORKDIR /app
 COPY --from=build /bin/web /app/web
+COPY --from=build /bin/import-schedule /app/import-schedule
 
 ENV PORT=8080
 # On Fly.io the persistent volume is mounted at /data (see fly.toml).

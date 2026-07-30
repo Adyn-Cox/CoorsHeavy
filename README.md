@@ -11,7 +11,9 @@ account (env vars) unlocks editing.
   position (P, C, 1B, 2B, 3B, SS, LF, CLF, CRF, RF, Bench), and tap a badge to
   mark attendance (Here / Absent).
 - **Schedule** — Coors Heavy's games with home/away, time, location, and result.
-  Admins record/edit each game's score inline (auto-computes W/L/T).
+  Admins record/edit each game's score inline (auto-computes W/L/T). Playoff
+  rows also let an admin pick the start time (6/7/8 PM) and the opponent from
+  the teams on the schedule, since seeding isn't known until the season ends.
 - **Beer** — per-player progress bar toward **2 thirty-racks**; admin sets the
   amount (0, 0.5, 1, 1.5, 2). Plus a **donations** list (who, what, donated y/n)
   the admin can add to, toggle, and remove.
@@ -79,21 +81,36 @@ page automatically (it's hidden until the file exists).
 
 ## Schedule
 
-Coors Heavy's 10 league games (Thursday Men's E Rec D2, Stazio #2) live in
-`internal/store/seed.go` and are loaded automatically on first run. The schedule
-page shows date, time, matchup (`vs` home / `@` away), location, and result
-(weeks 1–3 scores included; future games show `—`). Week 8 (bye) and the
-playoffs are noted below the table.
+Coors Heavy's 10 league games plus 2 playoff games (Thursday Men's E Rec D2,
+Stazio #2) live in `internal/store/seed.go` and are loaded automatically on
+first run. The schedule page shows date, time, matchup (`vs` home / `@` away),
+and result (weeks 1–3 scores included; future games show `—`). Week 8 (bye) is
+noted below the table.
+
+- **Thu 7/30** is the makeup game vs Big Sticks, postponed from 6/25.
+- **Thu 8/6** (Round 1) and **Thu 8/13** (Championship) are flagged
+  `Playoff: true`. They seed as `TBD` at 7:00 PM.
 
 **Recording scores:** log in as admin and edit a game's score inline on the
 schedule page (enter our runs vs theirs, hit Save — W/L/T is computed; Clear
-resets a game to unplayed). This works in production too, no redeploy needed.
+resets a game to unplayed).
 
-To reset the whole schedule back to the values in `seedGames` (locally):
+**Setting a playoff matchup:** on a playoff row an admin gets two dropdowns —
+start time (6:00 / 7:00 / 8:00 PM) and opponent (any team on the schedule, or
+`TBD`). Both save on change and update the row in place.
+
+Both work in production, no redeploy needed.
+
+To reload the schedule from `seedGames` after editing it:
 
 ```bash
-make import-schedule      # wipes the games table and reloads from seed.go
+make import-schedule                     # locally, against DB_PATH
+fly ssh console -C /app/import-schedule  # in production, against the volume
 ```
+
+The import matches existing rows to seed rows by opponent + home/away, so
+scores recorded through the UI survive a reload even if the game's date moved.
+Add `-fresh` to drop them and take the seed values verbatim.
 
 ## Build
 
@@ -125,9 +142,29 @@ fly deploy && fly open
 
 Notes:
 - SQLite is single-writer — keep this to **one machine** (don't scale count > 1).
+  `fly.toml` sets `strategy = "immediate"` for the same reason: a rolling deploy
+  would need a second machine, and only one can hold the volume.
+- `primary_region` and the volume's region must match (both `den` above).
 - `ENV=production` (set in `fly.toml`) turns on Secure cookies for HTTPS.
+- Fly health-checks `GET /healthz`; machines auto-stop when idle and auto-start
+  on the next request, so a cold hit takes an extra second.
+- Migrations run at startup and are tracked in a `schema_migrations` table, so a
+  deploy applies any new `internal/store/migrations/*.sql` exactly once.
+- If you're using Spotify, point the redirect URI at the deployed host:
+  `fly secrets set SPOTIFY_REDIRECT_URI=https://coorsheavy.fly.dev/spotify/callback`.
 - Outgrowing SQLite later means adding a `postgres.go` implementing
   `store.Store`; handlers and views don't change.
+
+### Applying a schedule change to production
+
+Editing `internal/store/seed.go` only affects a fresh database — the running app
+seeds once. To push a schedule edit (like the 6/25 → 7/30 postponement) to the
+live volume:
+
+```bash
+fly deploy
+fly ssh console -C /app/import-schedule
+```
 
 ## How HTMX is used (the pattern to copy)
 

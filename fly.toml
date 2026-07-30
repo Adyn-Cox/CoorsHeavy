@@ -2,7 +2,7 @@
 # adjust the name/region, then `fly deploy`. See README for the full walkthrough.
 
 app = "coorsheavy"
-primary_region = "dfw"
+primary_region = "den" # Denver — closest region to Stazio
 
 [build]
 
@@ -10,6 +10,11 @@ primary_region = "dfw"
   PORT = "8080"
   DB_PATH = "/data/coorsheavy.db"
   ENV = "production"
+
+# The database is a single SQLite file on one volume, so a rolling deploy (which
+# briefly wants a second machine) can't work — replace the machine in place.
+[deploy]
+  strategy = "immediate"
 
 [http_service]
   internal_port = 8080
@@ -19,12 +24,22 @@ primary_region = "dfw"
   # Keep at most ONE machine: a SQLite file on a volume is single-writer.
   min_machines_running = 0
 
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/healthz"
+
 # Persistent volume so the SQLite database survives restarts/deploys.
 # Create it once with: fly volumes create coorsheavy_data --region den --size 1
 [[mounts]]
   source = "coorsheavy_data"
   destination = "/data"
+  initial_size = "1gb"
 
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"
+  # Headroom for the SQLite page cache on a small machine.
+  swap_size_mb = 512

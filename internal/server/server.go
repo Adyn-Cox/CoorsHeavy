@@ -9,6 +9,7 @@ import (
 
 	"github.com/Adyn-Cox/CoorsHeavy/internal/auth"
 	"github.com/Adyn-Cox/CoorsHeavy/internal/config"
+	"github.com/Adyn-Cox/CoorsHeavy/internal/spotify"
 	"github.com/Adyn-Cox/CoorsHeavy/internal/store"
 )
 
@@ -20,13 +21,20 @@ type Server struct {
 	handlers *Handlers
 }
 
-// New constructs a Server with its dependencies injected.
-func New(cfg config.Config, log *slog.Logger, st store.Store, authn *auth.Authenticator) *Server {
+// New constructs a Server with its dependencies injected. spotifyClient may be
+// nil when Spotify credentials are not configured.
+func New(cfg config.Config, log *slog.Logger, st store.Store, authn *auth.Authenticator, spotifyClient *spotify.Client) *Server {
 	return &Server{
-		cfg:      cfg,
-		log:      log,
-		authn:    authn,
-		handlers: &Handlers{store: st, authn: authn},
+		cfg:   cfg,
+		log:   log,
+		authn: authn,
+		handlers: &Handlers{
+			cfg:     cfg,
+			store:   st,
+			authn:   authn,
+			spotify: spotifyClient,
+			logger:  log,
+		},
 	}
 }
 

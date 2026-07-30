@@ -1,19 +1,26 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/Adyn-Cox/CoorsHeavy/internal/auth"
+	"github.com/Adyn-Cox/CoorsHeavy/internal/config"
+	"github.com/Adyn-Cox/CoorsHeavy/internal/spotify"
 	"github.com/Adyn-Cox/CoorsHeavy/internal/store"
 	"github.com/Adyn-Cox/CoorsHeavy/internal/view"
 )
 
 // Handlers groups the HTTP handlers and their dependencies.
 type Handlers struct {
-	store store.Store
-	authn *auth.Authenticator
+	cfg     config.Config
+	store   store.Store
+	authn   *auth.Authenticator
+	spotify *spotify.Client // nil when Spotify is not configured
+	logger  *slog.Logger
 }
 
 // --- Pages ------------------------------------------------------------------
@@ -28,15 +35,39 @@ func (h *Handlers) LineupPage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	var present, absent []store.Player
-	for _, p := range players {
-		if p.Attended {
-			present = append(present, p)
-		} else {
-			absent = append(absent, p)
+	allSongs, err := h.store.ListAllSongs(r.Context())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+
+	// Build map from playerID to PlayerWithSongs.
+	pwsMap := make(map[int64]*store.PlayerWithSongs, len(players))
+	for i := range players {
+		pws := &store.PlayerWithSongs{Player: players[i]}
+		pwsMap[players[i].ID] = pws
+	}
+	for i := range allSongs {
+		s := &allSongs[i]
+		if pws, ok := pwsMap[s.PlayerID]; ok {
+			if s.Slot == 1 {
+				pws.Song1 = s
+			} else if s.Slot == 2 {
+				pws.Song2 = s
+			}
 		}
 	}
-	_ = view.Lineup(present, absent).Render(r.Context(), w)
+
+	var present, absent []store.PlayerWithSongs
+	for _, p := range players {
+		pws := *pwsMap[p.ID]
+		if p.Attended {
+			present = append(present, pws)
+		} else {
+			absent = append(absent, pws)
+		}
+	}
+	_ = view.Lineup(present, absent, h.cfg.SpotifyEnabled()).Render(r.Context(), w)
 }
 
 func (h *Handlers) SchedulePage(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +76,7 @@ func (h *Handlers) SchedulePage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	_ = view.Schedule(games).Render(r.Context(), w)
+	_ = view.Schedule(games, store.Opponents(games)).Render(r.Context(), w)
 }
 
 func (h *Handlers) BeerPage(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +253,59 @@ func (h *Handlers) SetScore(w http.ResponseWriter, r *http.Request) {
 	_ = view.ScoreCell(g).Render(r.Context(), w)
 }
 
+// SetMatchup sets a playoff game's start time and/or opponent and returns the
+// updated schedule row. Each <select> posts on change, so only the field that
+// changed is present in the form — a missing field leaves that value alone.
+func (h *Handlers) SetMatchup(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	games, err := h.store.ListGames(r.Context())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	idx := slices.IndexFunc(games, func(g store.Game) bool { return g.ID == id })
+	if idx < 0 {
+		http.Error(w, "game not found", http.StatusNotFound)
+		return
+	}
+	g := games[idx]
+	if !g.Playoff {
+		http.Error(w, "only playoff games can be rescheduled", http.StatusBadRequest)
+		return
+	}
+
+	gameTime, opponent := g.Time, g.Opponent
+	opponents := store.Opponents(games)
+	if v, ok := formValue(r, "time"); ok {
+		if !store.ValidGameTime(v) {
+			http.Error(w, "invalid start time", http.StatusBadRequest)
+			return
+		}
+		gameTime = v
+	}
+	if v, ok := formValue(r, "opponent"); ok {
+		if v != store.TBDOpponent && !slices.Contains(opponents, v) {
+			http.Error(w, "unknown opponent", http.StatusBadRequest)
+			return
+		}
+		opponent = v
+	}
+
+	if err := h.store.UpdateGameMatchup(r.Context(), id, gameTime, opponent); err != nil {
+		serverError(w, err)
+		return
+	}
+	g.Time, g.Opponent = gameTime, opponent
+	_ = view.GameRow(g, opponents).Render(r.Context(), w)
+}
+
 // --- Donations admin actions ------------------------------------------------
 
 func (h *Handlers) AddDonation(w http.ResponseWriter, r *http.Request) {
@@ -274,6 +358,160 @@ func (h *Handlers) DeleteDonation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK) // empty body -> HTMX outerHTML swap removes the row
 }
 
+// --- Spotify song actions ---------------------------------------------------
+
+// SearchModal handles GET /songs/search-modal?player_id=&slot= and returns the
+// inner HTML of the song search modal. Public — no auth required.
+func (h *Handlers) SearchModal(w http.ResponseWriter, r *http.Request) {
+	playerID, _ := strconv.ParseInt(r.URL.Query().Get("player_id"), 10, 64)
+	slot, _ := strconv.Atoi(r.URL.Query().Get("slot"))
+	if slot != 1 && slot != 2 {
+		slot = 1
+	}
+	p, err := h.store.GetPlayer(r.Context(), playerID)
+	if err != nil {
+		http.Error(w, "player not found", http.StatusNotFound)
+		return
+	}
+	_ = view.SongSearchModal(p.Name, playerID, slot).Render(r.Context(), w)
+}
+
+// SearchTracks handles GET /search/tracks?q=&player_id=&slot= and returns an
+// HTMX fragment with up to 5 matching tracks. Public — no auth required.
+func (h *Handlers) SearchTracks(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	playerID, _ := strconv.ParseInt(r.URL.Query().Get("player_id"), 10, 64)
+	slot, _ := strconv.Atoi(r.URL.Query().Get("slot"))
+
+	if len(q) < 2 || h.spotify == nil {
+		_ = view.TrackSearchResults(nil, playerID, slot).Render(r.Context(), w)
+		return
+	}
+	tracks, err := h.spotify.SearchTracks(r.Context(), q)
+	if err != nil {
+		h.logger.Error("spotify search failed", "err", err)
+		_ = view.TrackSearchResults(nil, playerID, slot).Render(r.Context(), w)
+		return
+	}
+	_ = view.TrackSearchResults(tracks, playerID, slot).Render(r.Context(), w)
+}
+
+// SetSong handles POST /players/{id}/songs/{slot} and saves a track selection.
+// Public — no auth required so any teammate can assign songs.
+func (h *Handlers) SetSong(w http.ResponseWriter, r *http.Request) {
+	playerID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	slot, err := strconv.Atoi(r.PathValue("slot"))
+	if err != nil || (slot != 1 && slot != 2) {
+		http.Error(w, "slot must be 1 or 2", http.StatusBadRequest)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	song := store.PlayerSong{
+		PlayerID:   playerID,
+		Slot:       slot,
+		TrackID:    strings.TrimSpace(r.FormValue("track_id")),
+		TrackName:  strings.TrimSpace(r.FormValue("track_name")),
+		ArtistName: strings.TrimSpace(r.FormValue("artist_name")),
+	}
+	if song.TrackID == "" || song.TrackName == "" {
+		http.Error(w, "track_id and track_name required", http.StatusBadRequest)
+		return
+	}
+	if err := h.store.SetPlayerSong(r.Context(), song); err != nil {
+		serverError(w, err)
+		return
+	}
+	_ = view.SongSlot(playerID, slot, &song).Render(r.Context(), w)
+}
+
+// DeleteSong handles DELETE /players/{id}/songs/{slot} and clears a song slot.
+// Public — no auth required.
+func (h *Handlers) DeleteSong(w http.ResponseWriter, r *http.Request) {
+	playerID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	slot, err := strconv.Atoi(r.PathValue("slot"))
+	if err != nil || (slot != 1 && slot != 2) {
+		http.Error(w, "slot must be 1 or 2", http.StatusBadRequest)
+		return
+	}
+	if err := h.store.DeletePlayerSong(r.Context(), playerID, slot); err != nil {
+		serverError(w, err)
+		return
+	}
+	_ = view.SongSlot(playerID, slot, nil).Render(r.Context(), w)
+}
+
+// SyncPlaylist handles POST /playlist/sync (admin-only). It pushes all assigned
+// walk-up songs into the configured Spotify playlist. Round 1 is every active
+// player's first song; round 2 is their second song (or first again if absent).
+// Players who are benched, not attending, or have no songs are skipped.
+func (h *Handlers) SyncPlaylist(w http.ResponseWriter, r *http.Request) {
+	if h.spotify == nil {
+		http.Error(w, "spotify not configured", http.StatusServiceUnavailable)
+		return
+	}
+	players, err := h.store.ListPlayers(r.Context())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	allSongs, err := h.store.ListAllSongs(r.Context())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+
+	song1 := make(map[int64]store.PlayerSong)
+	song2 := make(map[int64]store.PlayerSong)
+	for _, s := range allSongs {
+		if s.Slot == 1 {
+			song1[s.PlayerID] = s
+		} else if s.Slot == 2 {
+			song2[s.PlayerID] = s
+		}
+	}
+
+	// Include players who are present and have at least one song. Skip absent players.
+	var active []store.Player
+	for _, p := range players {
+		if !p.Attended {
+			continue
+		}
+		if _, has := song1[p.ID]; !has {
+			continue
+		}
+		active = append(active, p)
+	}
+
+	var trackIDs []string
+	// Round 1 — everyone's first song.
+	for _, p := range active {
+		trackIDs = append(trackIDs, song1[p.ID].TrackID)
+	}
+	// Round 2 — second song if set, else repeat first.
+	for _, p := range active {
+		if s, ok := song2[p.ID]; ok {
+			trackIDs = append(trackIDs, s.TrackID)
+		} else {
+			trackIDs = append(trackIDs, song1[p.ID].TrackID)
+		}
+	}
+
+	if err := h.spotify.SyncPlaylist(r.Context(), trackIDs); err != nil {
+		_ = view.SyncResult(false, 0, err.Error()).Render(r.Context(), w)
+		return
+	}
+	_ = view.SyncResult(true, len(trackIDs), "").Render(r.Context(), w)
+}
+
 // --- helpers ----------------------------------------------------------------
 
 func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -283,6 +521,16 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+// formValue returns a trimmed form field and whether it was submitted at all,
+// so callers can tell "left unchanged" apart from "cleared".
+func formValue(r *http.Request, key string) (string, bool) {
+	vals, ok := r.Form[key]
+	if !ok || len(vals) == 0 {
+		return "", false
+	}
+	return strings.TrimSpace(vals[0]), true
 }
 
 func serverError(w http.ResponseWriter, err error) {

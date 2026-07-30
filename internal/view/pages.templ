@@ -35,15 +35,16 @@ templ homeCard(title, desc, href string) {
 // Lineup shows the roster split into present and absent players.
 // Admins get drag-to-reorder, position dropdowns, attendance toggles, and a Save button.
 // The public sees a read-only batting order with an absent section below the divider.
-templ Lineup(present, absent []store.Player) {
+// When spotifyEnabled, every player row shows song search slots (public can edit).
+templ Lineup(present, absent []store.PlayerWithSongs, spotifyEnabled bool) {
 	@Layout("Lineup") {
 		<h1 class="mb-2 text-3xl font-black uppercase tracking-widest">Lineup</h1>
 		if auth.IsAdmin(ctx) {
 			<p class="mb-4 text-sm text-gray-400">Drag ⠿ to set batting order. Set positions and attendance, then click Save Lineup.</p>
 			<form id="lineup-form" method="post" action="/lineup/save">
 				<div class="sortable space-y-2">
-					for i, p := range present {
-						@PlayerRow(i, p)
+					for i, pws := range present {
+						@PlayerRow(i, pws, spotifyEnabled)
 					}
 				</div>
 				<div class="my-5 flex items-center gap-3">
@@ -52,20 +53,30 @@ templ Lineup(present, absent []store.Player) {
 					<div class="h-px flex-1 bg-white opacity-30"></div>
 				</div>
 				<div class="space-y-2 opacity-50">
-					for _, p := range absent {
-						@PlayerRow(-1, p)
+					for _, pws := range absent {
+						@PlayerRow(-1, pws, spotifyEnabled)
 					}
 				</div>
-				<div class="mt-6">
+				<div class="mt-6 flex flex-wrap items-center gap-4">
 					<button type="submit" class="border border-white bg-white px-6 py-2 font-bold uppercase tracking-wide text-black hover:bg-black hover:text-white">
 						Save Lineup
 					</button>
+					if spotifyEnabled {
+						<button
+							type="button"
+							hx-post="/playlist/sync"
+							hx-target="#sync-result"
+							hx-swap="outerHTML"
+							class="border border-white px-6 py-2 font-bold uppercase tracking-wide hover:bg-white hover:text-black"
+						>Sync Playlist</button>
+						@SyncResult(false, 0, "")
+					}
 				</div>
 			</form>
 		} else {
 			<div class="space-y-2">
-				for i, p := range present {
-					@PlayerRow(i, p)
+				for i, pws := range present {
+					@PlayerRow(i, pws, spotifyEnabled)
 				}
 			</div>
 			if len(absent) > 0 {
@@ -75,8 +86,8 @@ templ Lineup(present, absent []store.Player) {
 					<div class="h-px flex-1 bg-white opacity-30"></div>
 				</div>
 				<div class="space-y-2 opacity-50">
-					for _, p := range absent {
-						@PlayerRow(-1, p)
+					for _, pws := range absent {
+						@PlayerRow(-1, pws, spotifyEnabled)
 					}
 				</div>
 			}
@@ -85,7 +96,8 @@ templ Lineup(present, absent []store.Player) {
 }
 
 // Schedule lists Coors Heavy's games (Thursday Men's E Rec D2, Stazio #2).
-templ Schedule(games []store.Game) {
+// opponents is the pick-list for playoff matchups (see GameRow).
+templ Schedule(games []store.Game, opponents []string) {
 	@Layout("Schedule") {
 		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">Schedule</h1>
 		<p class="mb-4 text-sm text-gray-400">Coors Heavy · Thursday Men's E Rec D2 · Stazio #2</p>
@@ -104,19 +116,15 @@ templ Schedule(games []store.Game) {
 					</thead>
 					<tbody>
 						for _, g := range games {
-							<tr>
-								<td class="border border-white px-3 py-2 whitespace-nowrap">{ g.Date }</td>
-								<td class="border border-white px-3 py-2 whitespace-nowrap">{ g.Time }</td>
-								<td class="border border-white px-3 py-2 font-semibold">{ matchup(g) }</td>
-								@ScoreCell(g)
-							</tr>
+							@GameRow(g, opponents)
 						}
 					</tbody>
 				</table>
 			</div>
 			<div class="mt-6 space-y-1 border-l-4 border-white pl-3 text-sm text-gray-400">
 				<p><span class="font-semibold uppercase">Week 8</span> — Independence Day tournament, no league game (bye).</p>
-				<p><span class="font-semibold uppercase">Playoffs</span> — Round 1: Thu 7/30 · Championship Round: Thu 8/6 · all at Stazio #2. Matchups set by final seed.</p>
+				<p><span class="font-semibold uppercase">Thu 7/30</span> — makeup game vs Big Sticks, postponed from 6/25.</p>
+				<p><span class="font-semibold uppercase">Playoffs</span> — Round 1: Thu 8/6 · Championship Round: Thu 8/13 · both at Stazio #2. Matchups are set by final seed; an admin sets the time and opponent above once they're announced.</p>
 			</div>
 		}
 	}
