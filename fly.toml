@@ -2,7 +2,7 @@
 # adjust the name/region, then `fly deploy`. See README for the full walkthrough.
 
 app = "coorsheavy"
-primary_region = "den" # Denver — closest region to Stazio
+primary_region = "dfw" # Must match the coorsheavy_data volume's region.
 
 [build]
 
@@ -32,7 +32,7 @@ primary_region = "den" # Denver — closest region to Stazio
     path = "/healthz"
 
 # Persistent volume so the SQLite database survives restarts/deploys.
-# Create it once with: fly volumes create coorsheavy_data --region den --size 1
+# Create it once with: fly volumes create coorsheavy_data --region dfw --size 1
 [[mounts]]
   source = "coorsheavy_data"
   destination = "/data"

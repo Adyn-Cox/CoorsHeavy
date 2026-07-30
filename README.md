@@ -128,7 +128,7 @@ fly auth login
 
 # Create the app (edit name/region in fly.toml first) and the SQLite volume
 fly launch --no-deploy --copy-config --name coorsheavy
-fly volumes create coorsheavy_data --region den --size 1
+fly volumes create coorsheavy_data --region dfw --size 1
 
 # Set the admin credentials + cookie secret as secrets (NOT in fly.toml)
 fly secrets set \
@@ -144,7 +144,8 @@ Notes:
 - SQLite is single-writer — keep this to **one machine** (don't scale count > 1).
   `fly.toml` sets `strategy = "immediate"` for the same reason: a rolling deploy
   would need a second machine, and only one can hold the volume.
-- `primary_region` and the volume's region must match (both `den` above).
+- `primary_region` and the volume's region must match (both `dfw` above) — a
+  volume in another region can't attach.
 - `ENV=production` (set in `fly.toml`) turns on Secure cookies for HTTPS.
 - Fly health-checks `GET /healthz`; machines auto-stop when idle and auto-start
   on the next request, so a cold hit takes an extra second.

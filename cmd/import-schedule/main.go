@@ -5,7 +5,8 @@
 // Scores already recorded through the admin UI are carried over: each existing
 // game is matched to a seed game by opponent + home/away (unique across the
 // season, so a rescheduled game keeps its result even though its date moved).
-// Pass -fresh to skip that and load the seed values verbatim.
+// A "played" 0-0 is treated as a postponement placeholder and dropped.
+// Pass -fresh to skip carry-over entirely and load the seed values verbatim.
 //
 //	go run ./cmd/import-schedule             # uses DB_PATH (default coorsheavy.db)
 //	DB_PATH=/data/coorsheavy.db go run ./cmd/import-schedule
@@ -52,6 +53,13 @@ func main() {
 		}
 		for _, g := range current {
 			if g.Playoff || !g.Played {
+				continue
+			}
+			// A "played" 0-0 is a placeholder, not a result — it's what a
+			// postponed game gets marked as. Carrying it over would stamp a
+			// meaningless "T 0-0" on the rescheduled date. Clearing a game in
+			// the UI sets played=false, so a genuine result is never 0-0.
+			if g.UsScore == 0 && g.ThemScore == 0 {
 				continue
 			}
 			existing[matchupKey{g.Opponent, g.Home}] = g
