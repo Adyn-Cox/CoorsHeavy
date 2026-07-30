@@ -42,9 +42,22 @@ func OpenSQLite(path string) (*SQLite, error) {
 	return s, nil
 }
 
-// migrate applies every .sql file in migrations/ in filename order (idempotent
-// SQL via IF NOT EXISTS). Swap in goose/golang-migrate when you need up/down.
+// migrate applies every .sql file in migrations/ in filename order, recording
+// each in schema_migrations so it runs exactly once. (Tracking matters for
+// non-idempotent statements — SQLite has no ALTER TABLE ... IF NOT EXISTS.)
+// Swap in goose/golang-migrate when you need up/down.
 func (s *SQLite) migrate() error {
+	if _, err := s.db.Exec(
+		"CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))",
+	); err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
+	}
+
+	applied, err := s.appliedMigrations()
+	if err != nil {
+		return err
+	}
+
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
 		return err
@@ -56,6 +69,9 @@ func (s *SQLite) migrate() error {
 	sort.Strings(names)
 
 	for _, name := range names {
+		if applied[name] {
+			continue
+		}
 		b, err := migrationsFS.ReadFile("migrations/" + name)
 		if err != nil {
 			return err
@@ -63,8 +79,29 @@ func (s *SQLite) migrate() error {
 		if _, err := s.db.Exec(string(b)); err != nil {
 			return fmt.Errorf("migrate %s: %w", name, err)
 		}
+		if _, err := s.db.Exec("INSERT INTO schema_migrations (name) VALUES (?)", name); err != nil {
+			return fmt.Errorf("record migration %s: %w", name, err)
+		}
 	}
 	return nil
+}
+
+func (s *SQLite) appliedMigrations() (map[string]bool, error) {
+	rows, err := s.db.Query("SELECT name FROM schema_migrations")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	applied := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		applied[name] = true
+	}
+	return applied, rows.Err()
 }
 
 // seed populates the roster and schedule the first time their tables are empty.
@@ -113,9 +150,8 @@ func (s *SQLite) seedGames() error {
 	}
 	defer tx.Rollback()
 	for _, g := range seedGames {
-		if _, err := tx.Exec(
-			"INSERT INTO games (sort_order, game_date, game_time, opponent, home, location, played, us_score, them_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			g.SortOrder, g.Date, g.Time, g.Opponent, boolToInt(g.Home), g.Location, boolToInt(g.Played), g.UsScore, g.ThemScore,
+		if _, err := tx.Exec(insertGameSQL,
+			g.SortOrder, g.Date, g.Time, g.Opponent, boolToInt(g.Home), g.Location, boolToInt(g.Played), g.UsScore, g.ThemScore, boolToInt(g.Playoff),
 		); err != nil {
 			return err
 		}
@@ -204,7 +240,11 @@ func (s *SQLite) SaveLineup(ctx context.Context, orderedIDs []int64, positions m
 
 // --- Schedule ---------------------------------------------------------------
 
-const gameColumns = "id, sort_order, game_date, game_time, opponent, home, location, played, us_score, them_score"
+const gameColumns = "id, sort_order, game_date, game_time, opponent, home, location, played, us_score, them_score, playoff"
+
+const insertGameSQL = `INSERT INTO games
+	(sort_order, game_date, game_time, opponent, home, location, played, us_score, them_score, playoff)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 func (s *SQLite) ListGames(ctx context.Context) ([]Game, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -231,9 +271,8 @@ func (s *SQLite) GetGame(ctx context.Context, id int64) (Game, error) {
 }
 
 func (s *SQLite) CreateGame(ctx context.Context, g Game) (Game, error) {
-	res, err := s.db.ExecContext(ctx,
-		"INSERT INTO games (sort_order, game_date, game_time, opponent, home, location, played, us_score, them_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		g.SortOrder, g.Date, g.Time, g.Opponent, boolToInt(g.Home), g.Location, boolToInt(g.Played), g.UsScore, g.ThemScore)
+	res, err := s.db.ExecContext(ctx, insertGameSQL,
+		g.SortOrder, g.Date, g.Time, g.Opponent, boolToInt(g.Home), g.Location, boolToInt(g.Played), g.UsScore, g.ThemScore, boolToInt(g.Playoff))
 	if err != nil {
 		return Game{}, err
 	}
@@ -245,6 +284,13 @@ func (s *SQLite) SetGameScore(ctx context.Context, id int64, us, them int, playe
 	_, err := s.db.ExecContext(ctx,
 		"UPDATE games SET played = ?, us_score = ?, them_score = ? WHERE id = ?",
 		boolToInt(played), us, them, id)
+	return err
+}
+
+func (s *SQLite) UpdateGameMatchup(ctx context.Context, id int64, gameTime, opponent string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE games SET game_time = ?, opponent = ? WHERE id = ?",
+		gameTime, opponent, id)
 	return err
 }
 
@@ -303,11 +349,59 @@ func (s *SQLite) DeleteDonation(ctx context.Context, id int64) error {
 	return err
 }
 
+// --- Songs ------------------------------------------------------------------
+
+func (s *SQLite) SetPlayerSong(ctx context.Context, song PlayerSong) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO player_songs (player_id, slot, track_id, track_name, artist_name)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(player_id, slot) DO UPDATE SET
+			track_id    = excluded.track_id,
+			track_name  = excluded.track_name,
+			artist_name = excluded.artist_name`,
+		song.PlayerID, song.Slot, song.TrackID, song.TrackName, song.ArtistName)
+	return err
+}
+
+func (s *SQLite) DeletePlayerSong(ctx context.Context, playerID int64, slot int) error {
+	_, err := s.db.ExecContext(ctx,
+		"DELETE FROM player_songs WHERE player_id = ? AND slot = ?", playerID, slot)
+	return err
+}
+
+func (s *SQLite) ListAllSongs(ctx context.Context) ([]PlayerSong, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT ps.player_id, ps.slot, ps.track_id, ps.track_name, ps.artist_name
+		FROM player_songs ps
+		JOIN players p ON p.id = ps.player_id
+		ORDER BY p.lineup_order, ps.slot`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var songs []PlayerSong
+	for rows.Next() {
+		s, err := scanPlayerSong(rows)
+		if err != nil {
+			return nil, err
+		}
+		songs = append(songs, s)
+	}
+	return songs, rows.Err()
+}
+
 // --- helpers ----------------------------------------------------------------
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
 type scanner interface {
 	Scan(dest ...any) error
+}
+
+func scanPlayerSong(sc scanner) (PlayerSong, error) {
+	var s PlayerSong
+	err := sc.Scan(&s.PlayerID, &s.Slot, &s.TrackID, &s.TrackName, &s.ArtistName)
+	return s, err
 }
 
 func scanPlayer(sc scanner) (Player, error) {
@@ -320,10 +414,11 @@ func scanPlayer(sc scanner) (Player, error) {
 
 func scanGame(sc scanner) (Game, error) {
 	var g Game
-	var home, played int
-	err := sc.Scan(&g.ID, &g.SortOrder, &g.Date, &g.Time, &g.Opponent, &home, &g.Location, &played, &g.UsScore, &g.ThemScore)
+	var home, played, playoff int
+	err := sc.Scan(&g.ID, &g.SortOrder, &g.Date, &g.Time, &g.Opponent, &home, &g.Location, &played, &g.UsScore, &g.ThemScore, &playoff)
 	g.Home = home != 0
 	g.Played = played != 0
+	g.Playoff = playoff != 0
 	return g, err
 }
 

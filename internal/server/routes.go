@@ -41,9 +41,19 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /players/{id}/attendance", auth.RequireAdmin(s.handlers.ToggleAttendance))
 	mux.HandleFunc("POST /players/{id}/beer", auth.RequireAdmin(s.handlers.SetBeer))
 	mux.HandleFunc("POST /games/{id}/score", auth.RequireAdmin(s.handlers.SetScore))
+	mux.HandleFunc("POST /games/{id}/matchup", auth.RequireAdmin(s.handlers.SetMatchup))
 	mux.HandleFunc("POST /donations", auth.RequireAdmin(s.handlers.AddDonation))
 	mux.HandleFunc("POST /donations/{id}/toggle", auth.RequireAdmin(s.handlers.ToggleDonation))
 	mux.HandleFunc("POST /donations/{id}/delete", auth.RequireAdmin(s.handlers.DeleteDonation))
+
+	// Spotify song assignment — public (any teammate can set/remove songs).
+	mux.HandleFunc("GET /songs/search-modal", s.handlers.SearchModal)
+	mux.HandleFunc("GET /search/tracks", s.handlers.SearchTracks)
+	mux.HandleFunc("POST /players/{id}/songs/{slot}", s.handlers.SetSong)
+	mux.HandleFunc("DELETE /players/{id}/songs/{slot}", s.handlers.DeleteSong)
+
+	// Spotify playlist sync — admin only.
+	mux.HandleFunc("POST /playlist/sync", auth.RequireAdmin(s.handlers.SyncPlaylist))
 
 	return s.middleware(mux)
 }

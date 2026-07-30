@@ -1,20 +1,38 @@
-// Command import-schedule wipes the games table and reloads Coors Heavy's
-// canonical schedule from store.SeedGames(). Run it after editing the schedule
-// data (internal/store/seed.go) — e.g. to add a weekly score.
+// Command import-schedule reloads Coors Heavy's canonical schedule from
+// store.SeedGames(). Run it after editing the schedule data
+// (internal/store/seed.go) — e.g. to move a postponed game or add the playoffs.
 //
-//	go run ./cmd/import-schedule        # uses DB_PATH (default coorsheavy.db)
+// Scores already recorded through the admin UI are carried over: each existing
+// game is matched to a seed game by opponent + home/away (unique across the
+// season, so a rescheduled game keeps its result even though its date moved).
+// Pass -fresh to skip that and load the seed values verbatim.
+//
+//	go run ./cmd/import-schedule             # uses DB_PATH (default coorsheavy.db)
 //	DB_PATH=/data/coorsheavy.db go run ./cmd/import-schedule
+//	fly ssh console -C /app/import-schedule  # in production
 package main
 
 import (
 	"context"
+	"flag"
 	"log"
 
 	"github.com/Adyn-Cox/CoorsHeavy/internal/config"
 	"github.com/Adyn-Cox/CoorsHeavy/internal/store"
 )
 
+// matchupKey identifies a game independently of its date, so a postponed game
+// still matches after being moved. Playoff games are excluded — their opponent
+// is TBD, so several would share a key.
+type matchupKey struct {
+	opponent string
+	home     bool
+}
+
 func main() {
+	fresh := flag.Bool("fresh", false, "discard recorded scores and load the seed values verbatim")
+	flag.Parse()
+
 	cfg := config.Load()
 
 	st, err := store.OpenSQLite(cfg.DBPath)
@@ -24,15 +42,40 @@ func main() {
 	defer st.Close()
 
 	ctx := context.Background()
+
+	// Snapshot the scores currently in the database before wiping.
+	existing := map[matchupKey]store.Game{}
+	if !*fresh {
+		current, err := st.ListGames(ctx)
+		if err != nil {
+			log.Fatalf("read games: %v", err)
+		}
+		for _, g := range current {
+			if g.Playoff || !g.Played {
+				continue
+			}
+			existing[matchupKey{g.Opponent, g.Home}] = g
+		}
+	}
+
 	if err := st.DeleteAllGames(ctx); err != nil {
 		log.Fatalf("clear games: %v", err)
 	}
 
 	games := store.SeedGames()
+	var kept int
 	for _, g := range games {
+		// Only fill in scores the seed doesn't already carry, so seed.go stays
+		// the source of truth wherever it has an opinion.
+		if !g.Played && !g.Playoff {
+			if prev, ok := existing[matchupKey{g.Opponent, g.Home}]; ok {
+				g.Played, g.UsScore, g.ThemScore = true, prev.UsScore, prev.ThemScore
+				kept++
+			}
+		}
 		if _, err := st.CreateGame(ctx, g); err != nil {
 			log.Fatalf("insert game %q: %v", g.Date, err)
 		}
 	}
-	log.Printf("loaded %d games into %s", len(games), cfg.DBPath)
+	log.Printf("loaded %d games into %s (%d recorded scores carried over)", len(games), cfg.DBPath, kept)
 }

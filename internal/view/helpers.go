@@ -1,6 +1,7 @@
 package view
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -13,6 +14,15 @@ func matchup(g store.Game) string {
 		return "vs " + g.Opponent
 	}
 	return "@ " + g.Opponent
+}
+
+// homeAway is matchup's prefix on its own, for rows where the opponent is a
+// dropdown rather than text.
+func homeAway(g store.Game) string {
+	if g.Home {
+		return "vs"
+	}
+	return "@"
 }
 
 // scoreVal prefills the admin score inputs (blank for unplayed games).
@@ -89,3 +99,21 @@ func racksLabel(r float64) string {
 
 // rackOptions are the selectable rack amounts (0 to 2 thirty-racks, half steps).
 func rackOptions() []float64 { return []float64{0, 0.5, 1, 1.5, 2} }
+
+// slotLabel returns "Song 1" or "Song 2" for the search input placeholder.
+func slotLabel(slot int) string { return "Song " + strconv.Itoa(slot) }
+
+// slotStr converts a slot int to string for use in element IDs / URLs.
+func slotStr(slot int) string { return strconv.Itoa(slot) }
+
+// trackValsJSON returns an hx-vals JSON object for a track selection button.
+// The JSON is HTML-attribute-safe; browsers decode entities before HTMX reads them.
+func trackValsJSON(trackID, trackName, artistName string) string {
+	b, _ := json.Marshal(map[string]string{
+		"track_id":    trackID,
+		"track_name":  trackName,
+		"artist_name": artistName,
+	})
+	return string(b)
+}
+

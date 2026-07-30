@@ -4,6 +4,11 @@ bin
 tmp
 data
 *.db
+*.db-shm
+*.db-wal
 .air.toml
 README.md
 .gitignore
+# Local secrets never belong in the build context — production values come from
+# Fly secrets (see README).
+.env
