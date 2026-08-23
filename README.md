@@ -269,13 +269,29 @@ home runs is most home runs however many trips it took. A box score marks no
 rate leaders at all: over one night a 1-for-1 ties a 4-for-4, and marking both
 says nothing.
 
-**Picking a game.** `/stats?game=<id>` is the same table scoped to one night —
-a box score is a season table over a smaller set of games, and writing it as a
-second page would guarantee the two drift apart. The game dropdown above the
-table switches between them, and on `/schedule` both the date and the matchup
-link straight to that game's box score. (On a playoff row an admin is still
-seeding, the matchup cell is a dropdown, so the date is the way in.) Only the qualifying-at-bat marker changes: a `15 AB`
-threshold is a season-long idea, so a box score doesn't star anyone.
+**Scope.** One control above the table decides how much to add up, widest first:
+
+| Showing | URL | |
+|---|---|---|
+| All seasons | `?scope=all` | career totals, every season combined |
+| One season | `?scope=<season>` | that season's totals |
+| One game | `?scope=g<game>` | that night's box score |
+
+All three render through the same column definitions, because they are the same
+table over different sets of games — writing a box score or a career table as a
+separate page would guarantee they drift apart. They are one dropdown rather
+than three because they are one question, and seeing "All seasons" in a list
+that also holds "Thu 7/16" shows they are ends of one scale. Game values are
+prefixed so a game id and a season id can't be mistaken for each other.
+
+Picking a season here is an explicit pick like any other, so it sticks when you
+click away. On `/schedule` both the date and the matchup link straight to a box
+score (`?game=<id>` also works, which is what those links use). On a playoff row
+an admin is still seeding, the matchup cell is a dropdown, so the date is the
+way in.
+
+Only the qualifying-at-bat marker changes between scopes: a `15 AB` threshold is
+a season-long idea, so a box score doesn't star anyone.
 
 The column definitions live in one place, `internal/view/statcolumns.go`, so the
 header, the player rows and the team totals row cannot drift apart. The entry
