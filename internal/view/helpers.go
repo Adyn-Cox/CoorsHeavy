@@ -3,9 +3,12 @@ package view
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
+	"strings"
 
 	"github.com/Adyn-Cox/CoorsHeavy/internal/store"
+	"github.com/a-h/templ"
 )
 
 // matchup renders a game from Coors Heavy's perspective: "vs X" at home, "@ X" away.
@@ -117,3 +120,130 @@ func trackValsJSON(trackID, trackName, artistName string) string {
 	return string(b)
 }
 
+// rate formats a baseball rate stat the way a box score does: three decimals,
+// and no leading zero below 1.000 (".412", but "1.750"). An undefined rate —
+// a zero denominator, which store.ratio signals with NaN — renders as a dash
+// rather than a misleading ".000".
+func rate(f float64) string {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return "—"
+	}
+	s := strconv.FormatFloat(f, 'f', 3, 64)
+	if strings.HasPrefix(s, "0.") {
+		return s[1:]
+	}
+	if strings.HasPrefix(s, "-0.") {
+		return "-" + s[2:]
+	}
+	return s
+}
+
+// count formats a stat that is a quantity rather than a rate — at-bats per home
+// run, runs per 7 innings — to one decimal place.
+func count(f float64) string {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return "—"
+	}
+	return strconv.FormatFloat(f, 'f', 1, 64)
+}
+
+// statCell renders a counting stat, dimming zeroes so the numbers that matter
+// stand out in a wide table.
+func statCell(n int) string { return strconv.Itoa(n) }
+
+// zeroDim returns a CSS class that fades zero values in a stat table.
+func zeroDim(n int) string {
+	if n == 0 {
+		return "px-2 py-1 text-right text-gray-600"
+	}
+	return "px-2 py-1 text-right"
+}
+
+// qualified reports whether a stat line has enough at-bats to rank on the
+// rate-stat leaderboards.
+func qualified(b store.Batting) bool { return b.AB >= store.MinQualifiedAB }
+
+// seasonPath builds a page URL for a given season.
+func seasonPath(base string, seasonID int64) string {
+	return base + "?season=" + strconv.FormatInt(seasonID, 10)
+}
+
+// recordLabel summarises a season's games as "5-3-1" (W-L-T), omitting ties
+// when there are none.
+func recordLabel(games []store.Game) string {
+	var w, l, t int
+	for _, g := range games {
+		if !g.Played {
+			continue
+		}
+		switch {
+		case g.UsScore > g.ThemScore:
+			w++
+		case g.UsScore < g.ThemScore:
+			l++
+		default:
+			t++
+		}
+	}
+	if w+l+t == 0 {
+		return "No games played yet"
+	}
+	if t > 0 {
+		return fmt.Sprintf("%d-%d-%d", w, l, t)
+	}
+	return fmt.Sprintf("%d-%d", w, l)
+}
+
+// statsTitle names the stats page for the browser tab.
+func statsTitle(sel *store.Game) string {
+	if sel == nil {
+		return "Stats"
+	}
+	return "Box Score · " + sel.Label()
+}
+
+// boxScoreLink points a schedule row at that game's stats. The season travels
+// with it so following the link out of an archived season doesn't silently
+// bounce back to the current one.
+func boxScoreLink(g store.Game) templ.SafeURL {
+	return templ.SafeURL("/stats?season=" + itoa(g.SeasonID) + "&game=" + itoa(g.ID))
+}
+
+// sheetLink opens the entry grid, on the selected game when there is one.
+func sheetLink(season store.Season, sel *store.Game) templ.SafeURL {
+	u := "/statsheet?season=" + itoa(season.ID)
+	if sel != nil {
+		u += "&game=" + itoa(sel.ID)
+	}
+	return templ.SafeURL(u)
+}
+
+// gameOption labels a game in the stats page's game picker: enough to pick the
+// right night out of a dropdown without opening it.
+func gameOption(g store.Game) string {
+	label := g.Label() + "  " + matchup(g)
+	if r := g.Result(); r != "" {
+		label += "  " + r
+	}
+	return label
+}
+
+// statsSubtitle is assembled in Go rather than in the template because templ
+// puts a space between adjacent expressions, which turns every " · " separator
+// into a wider gap than the one beside it.
+func statsSubtitle(season store.Season, sel *store.Game) string {
+	parts := []string{}
+	if sel != nil {
+		parts = append(parts, sel.Label(), matchup(*sel))
+		if r := sel.Result(); r != "" {
+			parts = append(parts, r)
+		}
+		parts = append(parts, season.Name)
+	} else {
+		parts = append(parts, "Batting", season.Name)
+		if season.League != "" {
+			parts = append(parts, season.League)
+		}
+	}
+	return strings.Join(parts, " · ")
+}

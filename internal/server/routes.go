@@ -29,14 +29,23 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /lineup", s.handlers.LineupPage)
 	mux.HandleFunc("GET /schedule", s.handlers.SchedulePage)
 	mux.HandleFunc("GET /beer", s.handlers.BeerPage)
+	mux.HandleFunc("GET /stats", s.handlers.StatsPage)
+	mux.HandleFunc("GET /stats/{slug}", s.handlers.PlayerStatsPage)
 
 	// Auth.
 	mux.HandleFunc("GET /login", s.handlers.LoginPage)
 	mux.HandleFunc("POST /login", s.handlers.LoginSubmit)
 	mux.HandleFunc("POST /logout", s.handlers.Logout)
 
+	// Stat entry grid — admin only. Reached from the stats page and from a
+	// schedule row, not from the nav: it is only ever wanted for one game.
+	mux.HandleFunc("GET /statsheet", auth.RequireAdmin(s.handlers.StatSheetPage))
+	mux.HandleFunc("POST /statsheet/save", auth.RequireAdmin(s.handlers.SaveStatSheet))
+
 	// Admin-only actions (HTMX endpoints).
 	mux.HandleFunc("POST /lineup/save", auth.RequireAdmin(s.handlers.SaveLineup))
+	mux.HandleFunc("POST /players", auth.RequireAdmin(s.handlers.AddPlayer))
+	mux.HandleFunc("POST /players/{id}/name", auth.RequireAdmin(s.handlers.RenamePlayer))
 	mux.HandleFunc("POST /players/{id}/position", auth.RequireAdmin(s.handlers.SetPosition))
 	mux.HandleFunc("POST /players/{id}/attendance", auth.RequireAdmin(s.handlers.ToggleAttendance))
 	mux.HandleFunc("POST /players/{id}/beer", auth.RequireAdmin(s.handlers.SetBeer))

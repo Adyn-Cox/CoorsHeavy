@@ -15,11 +15,12 @@ templ Home() {
 				class="mx-auto mb-6 h-40 w-40 object-contain"
 			/>
 			<h1 class="mb-2 text-4xl font-black uppercase tracking-widest">Coors Heavy</h1>
-			<p class="mb-8 text-gray-400">Team lineup, schedule, and beer tracker.</p>
+			<p class="mb-8 text-gray-400">Team lineup, schedule, stats, and beer tracker.</p>
 		</div>
-		<div class="grid gap-4 sm:grid-cols-3">
+		<div class="grid gap-4 sm:grid-cols-2">
 			@homeCard("Lineup", "Set the batting order, positions, and who showed up.", "/lineup")
-			@homeCard("Schedule", "Upcoming and past games.", "/schedule")
+			@homeCard("Schedule", "Upcoming and past games, every season.", "/schedule")
+			@homeCard("Stats", "Batting lines, averages, and career totals.", "/stats")
 			@homeCard("Beer", "Who brought their racks — and who donated.", "/beer")
 		</div>
 	}
@@ -52,7 +53,7 @@ templ Lineup(present, absent []store.PlayerWithSongs, spotifyEnabled bool) {
 					<span class="text-xs font-semibold uppercase tracking-widest text-gray-500">Absent</span>
 					<div class="h-px flex-1 bg-white opacity-30"></div>
 				</div>
-				<div class="space-y-2 opacity-50">
+				<div id="absent-list" class="space-y-2 opacity-50">
 					for _, pws := range absent {
 						@PlayerRow(-1, pws, spotifyEnabled)
 					}
@@ -73,6 +74,7 @@ templ Lineup(present, absent []store.PlayerWithSongs, spotifyEnabled bool) {
 					}
 				</div>
 			</form>
+			@AddPlayerForm()
 		} else {
 			<div class="space-y-2">
 				for i, pws := range present {
@@ -95,15 +97,29 @@ templ Lineup(present, absent []store.PlayerWithSongs, spotifyEnabled bool) {
 	}
 }
 
-// Schedule lists Coors Heavy's games (Thursday Men's E Rec D2, Stazio #2).
-// opponents is the pick-list for playoff matchups (see GameRow).
-templ Schedule(games []store.Game, opponents []string) {
+// Schedule lists one season's games. opponents is the pick-list for playoff
+// matchups (see GameRow). The league, location and footnotes come from the
+// season row rather than being hardcoded, so every season reads correctly.
+templ Schedule(season store.Season, seasons []store.Season, games []store.Game, opponents []string) {
 	@Layout("Schedule") {
 		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">Schedule</h1>
-		<p class="mb-4 text-sm text-gray-400">Coors Heavy · Thursday Men's E Rec D2 · Stazio #2</p>
+		<p class="mb-4 text-sm text-gray-400">
+			Coors Heavy · { season.Name }
+			if season.League != "" {
+				{ " · " + season.League }
+			}
+			if season.Location != "" {
+				{ " · " + season.Location }
+			}
+		</p>
+		@SeasonSwitcher(season, seasons, "/schedule")
 		if len(games) == 0 {
-			<p class="text-gray-400">No games yet. Run <code>make import-schedule</code> to load them.</p>
+			<p class="text-gray-400">
+				No games yet for { season.Name }. Load them with
+				<code>go run ./cmd/import-schedule -season { store.Itoa(season.ID) }</code>.
+			</p>
 		} else {
+			<p class="mb-3 text-sm font-semibold uppercase tracking-widest">Record: { recordLabel(games) }</p>
 			<div class="overflow-x-auto">
 				<table class="w-full border-collapse border border-white text-left">
 					<thead>
@@ -121,23 +137,26 @@ templ Schedule(games []store.Game, opponents []string) {
 					</tbody>
 				</table>
 			</div>
-			<div class="mt-6 space-y-1 border-l-4 border-white pl-3 text-sm text-gray-400">
-				<p><span class="font-semibold uppercase">Week 8</span> — Independence Day tournament, no league game (bye).</p>
-				<p><span class="font-semibold uppercase">Thu 7/30</span> — makeup game vs Big Sticks, postponed from 6/25.</p>
-				<p><span class="font-semibold uppercase">Playoffs</span> — Round 1: Thu 8/6 · Championship Round: Thu 8/13 · both at Stazio #2. Matchups are set by final seed; an admin sets the time and opponent above once they're announced.</p>
-			</div>
+			if len(season.NoteLines()) > 0 {
+				<div class="mt-6 space-y-1 border-l-4 border-white pl-3 text-sm text-gray-400">
+					for _, note := range season.NoteLines() {
+						<p>{ note }</p>
+					}
+				</div>
+			}
 		}
 	}
 }
 
 // Beer shows each player's progress toward 2 racks, then the donations list.
-templ Beer(players []store.Player, donations []store.Donation) {
+templ Beer(season store.Season, seasons []store.Season, players []store.RosterPlayer, donations []store.Donation) {
 	@Layout("Beer") {
 		<h1 class="mb-2 text-3xl font-black uppercase tracking-widest">Beer</h1>
-		<p class="mb-4 text-sm text-gray-400">Goal: 2 thirty-racks per player.</p>
+		<p class="mb-4 text-sm text-gray-400">Goal: 2 thirty-racks per player · { season.Name }</p>
+		@SeasonSwitcher(season, seasons, "/beer")
 		<div class="grid gap-3 sm:grid-cols-2">
 			for _, p := range players {
-				@BeerRow(p)
+				@BeerRow(season.ID, p)
 			}
 		</div>
 
@@ -180,5 +199,219 @@ templ Login(errMsg string) {
 				</button>
 			</form>
 		</div>
+	}
+}
+
+// Stats is the batting table. With no game selected it totals the season; with
+// one it is that game's box score, rendered by the same columns — a box score
+// is a season table scoped to one night, and duplicating thirty column
+// definitions to say so would guarantee the two drift apart.
+//
+// Every rate follows the league's stat key and is derived from the stored
+// counting stats; nothing here is stored. The key defines 27 stats, far too
+// wide to read at once, so columns are grouped and the view toggles between
+// them.
+templ Stats(season store.Season, seasons []store.Season, games []store.Game, sel *store.Game, rows []store.PlayerBatting, team store.Batting) {
+	@Layout(statsTitle(sel)) {
+		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">
+			if sel != nil {
+				Box Score
+			} else {
+				Stats
+			}
+		</h1>
+		<p class="mb-4 text-sm text-gray-400">{ statsSubtitle(season, sel) }</p>
+		@SeasonSwitcher(season, seasons, "/stats")
+		@GamePicker(season, games, sel)
+		if len(rows) == 0 {
+			<p class="text-gray-400">
+				if sel != nil {
+					No stats recorded for { sel.Label() } vs { sel.Opponent } yet.
+				} else {
+					No stats recorded for { season.Name } yet.
+				}
+				if auth.IsAdmin(ctx) {
+					Type them in on the <a href={ sheetLink(season, sel) } class="underline">stat sheet</a>.
+				}
+			</p>
+		} else {
+			{{ table := newStatTable(rows, sel == nil) }}
+			<div class="mb-3 flex flex-wrap items-center gap-2">
+				<span class="text-xs font-semibold uppercase tracking-widest text-gray-500">Columns</span>
+				for _, g := range []string{"Standard", "Advanced", "All"} {
+					<button
+						type="button"
+						data-cols={ g }
+						class="stat-toggle border border-white px-3 py-1 text-xs font-bold uppercase tracking-wide hover:bg-white hover:text-black"
+					>{ g }</button>
+				}
+				<span class="ml-2 text-xs text-gray-500">
+					Click a column to sort · hover a header for its definition ·
+					<span class="stat-lead">red</span> marks the leader
+					if sel == nil {
+						{ " · " + store.Itoa(int64(store.MinQualifiedAB)) + " AB to qualify (*)" }
+					}
+				</span>
+			</div>
+			<div class="overflow-x-auto">
+				<table id="stats-table" class="w-full border-collapse border border-white text-right text-sm">
+					<thead>
+						<tr class="bg-white text-black">
+							for _, c := range statColumns() {
+								<th
+									data-sort={ c.sortKind() }
+									data-group={ c.Group }
+									title={ c.Help }
+									class={ headerClass(c) }
+								>{ c.Label }</th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range rows {
+							@StatRow(row, table)
+						}
+					</tbody>
+					<tfoot>
+						@StatRow(teamRow(team), table)
+					</tfoot>
+				</table>
+			</div>
+			<script src="/static/sorttable.js"></script>
+			if auth.IsAdmin(ctx) {
+				<p class="mt-4 text-sm">
+					<a href={ sheetLink(season, sel) } class="border border-white px-3 py-1 text-xs font-bold uppercase tracking-wide hover:bg-white hover:text-black">
+						if sel != nil {
+							Edit this game
+						} else {
+							Enter stats
+						}
+					</a>
+				</p>
+			}
+		}
+	}
+}
+
+// PlayerStats is one player's game log, season totals and career totals.
+templ PlayerStats(p store.Player, season store.Season, seasons []store.Season, log []store.GameBatting, seasonTotal store.Batting, career store.Batting, careerGames int) {
+	@Layout(p.Name) {
+		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">{ p.Name }</h1>
+		<p class="mb-4 text-sm text-gray-400">Game log · { season.Name }</p>
+		@SeasonSwitcher(season, seasons, "/stats/"+p.Slug)
+		<div class="mb-6 grid gap-3 sm:grid-cols-4">
+			@statTile("Avg", rate(seasonTotal.AVG()))
+			@statTile("OB%", rate(seasonTotal.OBP()))
+			@statTile("Slug", rate(seasonTotal.SLG()))
+			@statTile("RP7", count(seasonTotal.RP7()))
+		</div>
+		<h2 class="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-500">
+			{ season.Name } — full line
+		</h2>
+		<div class="mb-8 grid grid-cols-3 gap-px border border-gray-700 bg-gray-700 sm:grid-cols-5 lg:grid-cols-7">
+			for _, p := range statSummary(seasonTotal, len(log)) {
+				<div class="bg-black px-2 py-2 text-center" title={ p.Help }>
+					<div class="text-[10px] font-semibold uppercase tracking-widest text-gray-500">{ p.Label }</div>
+					<div class={ summaryValueClass(p) }>{ p.Value }</div>
+				</div>
+			}
+		</div>
+		if len(log) == 0 {
+			<p class="text-gray-400">No games recorded for { p.Name } in { season.Name }.</p>
+		} else {
+			<div class="overflow-x-auto">
+				<table class="w-full border-collapse border border-white text-right text-sm">
+					<thead>
+						<tr class="bg-white text-black">
+							<th class="border border-white px-2 py-2 text-left">Date</th>
+							<th class="border border-white px-2 py-2 text-left">Opponent</th>
+							for _, c := range []string{"AB", "R", "H", "2B", "3B", "HR", "RBI", "BB", "SO", "SF", "E", "AVG"} {
+								<th class="border border-white px-2 py-2">{ c }</th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, gb := range log {
+							<tr class="border-b border-gray-700">
+								<td class="px-2 py-1 text-left">{ gb.Label() }</td>
+								<td class="px-2 py-1 text-left">{ matchup(gb.Game) }</td>
+								<td class={ zeroDim(gb.AB) }>{ statCell(gb.AB) }</td>
+								<td class={ zeroDim(gb.R) }>{ statCell(gb.R) }</td>
+								<td class={ zeroDim(gb.H) }>{ statCell(gb.H) }</td>
+								<td class={ zeroDim(gb.B2) }>{ statCell(gb.B2) }</td>
+								<td class={ zeroDim(gb.B3) }>{ statCell(gb.B3) }</td>
+								<td class={ zeroDim(gb.HR) }>{ statCell(gb.HR) }</td>
+								<td class={ zeroDim(gb.RBI) }>{ statCell(gb.RBI) }</td>
+								<td class={ zeroDim(gb.BB) }>{ statCell(gb.BB) }</td>
+								<td class={ zeroDim(gb.SO) }>{ statCell(gb.SO) }</td>
+								<td class={ zeroDim(gb.SF) }>{ statCell(gb.SF) }</td>
+								<td class={ zeroDim(gb.E) }>{ statCell(gb.E) }</td>
+								<td class="px-2 py-1 font-semibold">{ rate(gb.Batting.AVG()) }</td>
+							</tr>
+						}
+					</tbody>
+					<tfoot>
+						<tr class="border-t-2 border-white font-bold">
+							<td class="px-2 py-1 text-left uppercase" colspan="2">{ season.Name } total</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.AB) }</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.R) }</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.H) }</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.B2) }</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.B3) }</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.HR) }</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.RBI) }</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.BB) }</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.SO) }</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.SF) }</td>
+							<td class="px-2 py-1">{ statCell(seasonTotal.E) }</td>
+							<td class="px-2 py-1">{ rate(seasonTotal.AVG()) }</td>
+						</tr>
+						if len(seasons) > 1 {
+							<tr class="text-gray-400">
+								<td class="px-2 py-1 text-left uppercase" colspan="2">Career ({ statCell(careerGames) } G)</td>
+								<td class="px-2 py-1">{ statCell(career.AB) }</td>
+								<td class="px-2 py-1">{ statCell(career.R) }</td>
+								<td class="px-2 py-1">{ statCell(career.H) }</td>
+								<td class="px-2 py-1">{ statCell(career.B2) }</td>
+								<td class="px-2 py-1">{ statCell(career.B3) }</td>
+								<td class="px-2 py-1">{ statCell(career.HR) }</td>
+								<td class="px-2 py-1">{ statCell(career.RBI) }</td>
+								<td class="px-2 py-1">{ statCell(career.BB) }</td>
+								<td class="px-2 py-1">{ statCell(career.SO) }</td>
+								<td class="px-2 py-1">{ statCell(career.SF) }</td>
+								<td class="px-2 py-1">{ statCell(career.E) }</td>
+								<td class="px-2 py-1">{ rate(career.AVG()) }</td>
+							</tr>
+						}
+					</tfoot>
+				</table>
+			</div>
+		}
+	}
+}
+
+templ statTile(label, value string) {
+	<div class="border-2 border-white p-4 text-center">
+		<div class="text-xs font-semibold uppercase tracking-widest text-gray-400">{ label }</div>
+		<div class="text-2xl font-black">{ value }</div>
+	</div>
+}
+
+// StatSheet is the transcription grid: pick a game, type a line per player,
+// save. Admin-only.
+//
+// It opens on whatever is already stored for a game, so editing a night that
+// has been typed is the same act as typing it the first time.
+templ StatSheet(season store.Season, seasons []store.Season, data any) {
+	@Layout("Stat Sheet") {
+		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">Stat Sheet</h1>
+		<p class="mb-4 text-sm text-gray-400">
+			{ season.Name } · type a line per player, then save. Work in progress is
+			kept in this browser until you do.
+		</p>
+		@SeasonSwitcher(season, seasons, "/statsheet")
+		@templ.JSONScript("statsheet-data", data)
+		<div id="statsheet-root" class="space-y-4"></div>
+		<script src="/static/statsheet.js"></script>
 	}
 }

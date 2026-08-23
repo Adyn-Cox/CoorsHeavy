@@ -23,19 +23,56 @@ type Handlers struct {
 	logger  *slog.Logger
 }
 
+// --- Season resolution ------------------------------------------------------
+
+// season resolves which season a request is about: an explicit ?season=N (or a
+// season form field on an HTMX post), otherwise the current one. Every
+// season-scoped page and edit goes through here, so nothing silently reads or
+// writes across seasons.
+func (h *Handlers) season(r *http.Request) (store.Season, error) {
+	raw := r.URL.Query().Get("season")
+	if raw == "" {
+		raw = r.FormValue("season")
+	}
+	if raw != "" {
+		if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			return h.store.GetSeason(r.Context(), id)
+		}
+	}
+	return h.store.CurrentSeason(r.Context())
+}
+
+// seasonContext bundles the values every season-scoped page needs: the season
+// being viewed and the full list for the switcher.
+func (h *Handlers) seasonContext(r *http.Request) (store.Season, []store.Season, error) {
+	sn, err := h.season(r)
+	if err != nil {
+		return store.Season{}, nil, err
+	}
+	all, err := h.store.ListSeasons(r.Context())
+	return sn, all, err
+}
+
 // --- Pages ------------------------------------------------------------------
 
 func (h *Handlers) Home(w http.ResponseWriter, r *http.Request) {
 	_ = view.Home().Render(r.Context(), w)
 }
 
+// LineupPage always shows the current season: a lineup card is about tonight's
+// game, so there is nothing to switch between.
 func (h *Handlers) LineupPage(w http.ResponseWriter, r *http.Request) {
-	players, err := h.store.ListPlayers(r.Context())
+	season, err := h.store.CurrentSeason(r.Context())
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	allSongs, err := h.store.ListAllSongs(r.Context())
+	players, err := h.store.ListRoster(r.Context(), season.ID)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	allSongs, err := h.store.ListAllSongs(r.Context(), season.ID)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -44,7 +81,7 @@ func (h *Handlers) LineupPage(w http.ResponseWriter, r *http.Request) {
 	// Build map from playerID to PlayerWithSongs.
 	pwsMap := make(map[int64]*store.PlayerWithSongs, len(players))
 	for i := range players {
-		pws := &store.PlayerWithSongs{Player: players[i]}
+		pws := &store.PlayerWithSongs{RosterPlayer: players[i]}
 		pwsMap[players[i].ID] = pws
 	}
 	for i := range allSongs {
@@ -71,26 +108,36 @@ func (h *Handlers) LineupPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) SchedulePage(w http.ResponseWriter, r *http.Request) {
-	games, err := h.store.ListGames(r.Context())
+	season, seasons, err := h.seasonContext(r)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	_ = view.Schedule(games, store.Opponents(games)).Render(r.Context(), w)
+	games, err := h.store.ListGames(r.Context(), season.ID)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	_ = view.Schedule(season, seasons, games, store.Opponents(games)).Render(r.Context(), w)
 }
 
 func (h *Handlers) BeerPage(w http.ResponseWriter, r *http.Request) {
-	players, err := h.store.ListPlayers(r.Context())
+	season, seasons, err := h.seasonContext(r)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	donations, err := h.store.ListDonations(r.Context())
+	players, err := h.store.ListRoster(r.Context(), season.ID)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	_ = view.Beer(players, donations).Render(r.Context(), w)
+	donations, err := h.store.ListDonations(r.Context(), season.ID)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	_ = view.Beer(season, seasons, players, donations).Render(r.Context(), w)
 }
 
 // --- Auth -------------------------------------------------------------------
@@ -146,11 +193,87 @@ func (h *Handlers) SaveLineup(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if err := h.store.SaveLineup(r.Context(), ids, positions); err != nil {
+	season, err := h.store.CurrentSeason(r.Context())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	if err := h.store.SaveLineup(r.Context(), season.ID, ids, positions); err != nil {
 		serverError(w, err)
 		return
 	}
 	http.Redirect(w, r, "/lineup", http.StatusSeeOther)
+}
+
+// AddPlayer creates a person and puts them on the current season's roster.
+// They start benched and absent, so they land in the Absent section until
+// someone marks them here — same as anyone who misses a week.
+func (h *Handlers) AddPlayer(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	season, err := h.store.CurrentSeason(r.Context())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	p, err := h.store.CreatePlayer(r.Context(), name)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	if err := h.store.AddToRoster(r.Context(), season.ID, p.ID); err != nil {
+		serverError(w, err)
+		return
+	}
+	rp, err := h.store.GetRosterPlayer(r.Context(), season.ID, p.ID)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	// idx -1 renders an un-numbered row: they're not in the batting order yet.
+	_ = view.PlayerRow(-1, store.PlayerWithSongs{RosterPlayer: rp}, h.cfg.SpotifyEnabled()).
+		Render(r.Context(), w)
+}
+
+// RenamePlayer changes a player's display name. This is what finally lets the
+// duplicate seed names (two Patty, two Parker) be told apart — until they are,
+// four players are ambiguous in the stat sheet and any name-keyed CSV.
+//
+// The slug is left alone: it is the key the stats CSV already references, so
+// regenerating it would orphan lines already typed against the old one.
+func (h *Handlers) RenamePlayer(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		http.Error(w, "name cannot be empty", http.StatusBadRequest)
+		return
+	}
+	p, err := h.store.GetPlayer(r.Context(), id)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	if err := h.store.RenamePlayer(r.Context(), id, name, p.Slug); err != nil {
+		serverError(w, err)
+		return
+	}
+	season, err := h.store.CurrentSeason(r.Context())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	rp, err := h.store.GetRosterPlayer(r.Context(), season.ID, id)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	_ = view.PlayerName(rp).Render(r.Context(), w)
 }
 
 func (h *Handlers) SetPosition(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +286,12 @@ func (h *Handlers) SetPosition(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid position", http.StatusBadRequest)
 		return
 	}
-	if err := h.store.UpdatePosition(r.Context(), id, position); err != nil {
+	season, err := h.season(r)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	if err := h.store.UpdatePosition(r.Context(), season.ID, id, position); err != nil {
 		serverError(w, err)
 		return
 	}
@@ -175,13 +303,18 @@ func (h *Handlers) ToggleAttendance(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, err := h.store.GetPlayer(r.Context(), id)
+	season, err := h.season(r)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	p, err := h.store.GetRosterPlayer(r.Context(), season.ID, id)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
 	p.Attended = !p.Attended
-	if err := h.store.SetAttended(r.Context(), id, p.Attended); err != nil {
+	if err := h.store.SetAttended(r.Context(), season.ID, id, p.Attended); err != nil {
 		serverError(w, err)
 		return
 	}
@@ -204,16 +337,21 @@ func (h *Handlers) SetBeer(w http.ResponseWriter, r *http.Request) {
 	if racks > 2 {
 		racks = 2
 	}
-	if err := h.store.SetBeerRacks(r.Context(), id, racks); err != nil {
-		serverError(w, err)
-		return
-	}
-	p, err := h.store.GetPlayer(r.Context(), id)
+	season, err := h.season(r)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	_ = view.BeerRow(p).Render(r.Context(), w)
+	if err := h.store.SetBeerRacks(r.Context(), season.ID, id, racks); err != nil {
+		serverError(w, err)
+		return
+	}
+	p, err := h.store.GetRosterPlayer(r.Context(), season.ID, id)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	_ = view.BeerRow(season.ID, p).Render(r.Context(), w)
 }
 
 // --- Schedule admin actions -------------------------------------------------
@@ -265,7 +403,14 @@ func (h *Handlers) SetMatchup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	games, err := h.store.ListGames(r.Context())
+	// Scope the opponent pick-list to the game's own season, so a playoff
+	// matchup can never be set to a team from a different year.
+	target, err := h.store.GetGame(r.Context(), id)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	games, err := h.store.ListGames(r.Context(), target.SeasonID)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -320,7 +465,12 @@ func (h *Handlers) AddDonation(w http.ResponseWriter, r *http.Request) {
 	}
 	description := strings.TrimSpace(r.FormValue("description"))
 	donated := r.FormValue("donated") == "true"
-	d, err := h.store.CreateDonation(r.Context(), name, description, donated)
+	season, err := h.season(r)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	d, err := h.store.CreateDonation(r.Context(), season.ID, name, description, donated)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -458,12 +608,17 @@ func (h *Handlers) SyncPlaylist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "spotify not configured", http.StatusServiceUnavailable)
 		return
 	}
-	players, err := h.store.ListPlayers(r.Context())
+	season, err := h.store.CurrentSeason(r.Context())
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	allSongs, err := h.store.ListAllSongs(r.Context())
+	players, err := h.store.ListRoster(r.Context(), season.ID)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	allSongs, err := h.store.ListAllSongs(r.Context(), season.ID)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -480,7 +635,7 @@ func (h *Handlers) SyncPlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Include players who are present and have at least one song. Skip absent players.
-	var active []store.Player
+	var active []store.RosterPlayer
 	for _, p := range players {
 		if !p.Attended {
 			continue

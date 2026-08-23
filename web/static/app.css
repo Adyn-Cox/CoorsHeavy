@@ -18,3 +18,14 @@ body {
 .bg-coors-blue     { background-color: var(--coors-blue); }
 .text-coors-red    { color: var(--coors-red); }
 .text-coors-blue   { color: var(--coors-blue); }
+
+/* Column leader in the stats table. A lighter Coors red than --coors-red,
+   which is too dark to read as a number on a black background. */
+:root {
+  --lead-red: #E4344F;
+}
+
+.stat-lead {
+  color: var(--lead-red);
+  font-weight: 600;
+}
