@@ -446,6 +446,8 @@ type Store interface {
 	ListBattingForGame(ctx context.Context, gameID int64) ([]BattingLine, error)
 	// BoxScore is one game's lines with player names attached, in batting order.
 	BoxScore(ctx context.Context, gameID int64) ([]PlayerBatting, error)
+	// SeasonBatting totals each player's lines for a season, or for every
+	// season when seasonID is 0.
 	SeasonBatting(ctx context.Context, seasonID int64) ([]PlayerBatting, error)
 	CareerBatting(ctx context.Context, playerID int64) (Batting, int, error)
 	PlayerGameLog(ctx context.Context, playerID, seasonID int64) ([]GameBatting, error)

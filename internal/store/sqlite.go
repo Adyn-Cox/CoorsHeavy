@@ -692,16 +692,23 @@ func (s *SQLite) BoxScore(ctx context.Context, gameID int64) ([]PlayerBatting, e
 	return out, rows.Err()
 }
 
-// SeasonBatting totals every player's lines for one season, best OPS first.
+// SeasonBatting totals every player's lines for one season. Pass seasonID 0 for
+// every season at once — the same convention PlayerGameLog uses — which is what
+// the stats page's "All seasons" scope reads.
 func (s *SQLite) SeasonBatting(ctx context.Context, seasonID int64) ([]PlayerBatting, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.id, p.name, p.slug, COUNT(bl.id), `+battingSums+`
+	q := `
+		SELECT p.id, p.name, p.slug, COUNT(bl.id), ` + battingSums + `
 		FROM batting_lines bl
 		JOIN games   g ON g.id = bl.game_id
-		JOIN players p ON p.id = bl.player_id
-		WHERE g.season_id = ?
-		GROUP BY p.id, p.name, p.slug
-		ORDER BY p.name`, seasonID)
+		JOIN players p ON p.id = bl.player_id`
+	var args []any
+	if seasonID > 0 {
+		q += " WHERE g.season_id = ?"
+		args = append(args, seasonID)
+	}
+	q += " GROUP BY p.id, p.name, p.slug ORDER BY p.name"
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

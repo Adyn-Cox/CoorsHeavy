@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Adyn-Cox/CoorsHeavy/internal/auth"
 	"github.com/Adyn-Cox/CoorsHeavy/internal/config"
@@ -26,21 +27,77 @@ type Handlers struct {
 
 // --- Season resolution ------------------------------------------------------
 
-// season resolves which season a request is about: an explicit ?season=N (or a
-// season form field on an HTMX post), otherwise the current one. Every
-// season-scoped page and edit goes through here, so nothing silently reads or
-// writes across seasons.
+// seasonCookie remembers which season the visitor picked, so the choice
+// survives clicking through the nav. Rewriting every link on the site to carry
+// ?season=N would work too, and would break the first time a link was added
+// without it.
+const seasonCookie = "ch_season"
+
+// season resolves which season a request is about, in order: an explicit
+// ?season=N (or a season form field on an HTMX post), then the visitor's
+// remembered pick, then the current season. Every season-scoped page and edit
+// goes through here, so nothing silently reads or writes across seasons.
 func (h *Handlers) season(r *http.Request) (store.Season, error) {
-	raw := r.URL.Query().Get("season")
+	raw := explicitSeason(r)
 	if raw == "" {
 		raw = r.FormValue("season")
 	}
+	if raw == "" {
+		if c, err := r.Cookie(seasonCookie); err == nil {
+			raw = c.Value
+		}
+	}
 	if raw != "" {
 		if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
-			return h.store.GetSeason(r.Context(), id)
+			// A remembered season that has since been deleted must not 404 the
+			// whole site, so an unknown id falls through to the current one.
+			if sn, err := h.store.GetSeason(r.Context(), id); err == nil {
+				return sn, nil
+			}
 		}
 	}
 	return h.store.CurrentSeason(r.Context())
+}
+
+// rememberSeason persists an explicit pick.
+//
+// Picking the current season *clears* the cookie rather than pinning it. That
+// keeps "follow whatever season is live" the default state — otherwise a
+// visitor who chose Fall 2026 today would still be looking at it a year after
+// Spring 2027 opened.
+func (h *Handlers) rememberSeason(w http.ResponseWriter, r *http.Request, season store.Season) {
+	if explicitSeason(r) == "" {
+		return // no explicit pick on this request; leave the cookie alone
+	}
+	c := &http.Cookie{
+		Name:     seasonCookie,
+		Value:    store.Itoa(season.ID),
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int((365 * 24 * time.Hour).Seconds()),
+	}
+	if season.IsCurrent {
+		c.Value, c.MaxAge = "", -1
+	}
+	http.SetCookie(w, c)
+}
+
+// explicitSeason returns the season id the URL names, if any.
+//
+// The stats page's scope control offers seasons and games in one <select>, so
+// it carries its value in "scope" rather than "season"; a bare number there is
+// still an explicit season pick and has to be treated as one, or choosing a
+// season on the stats page wouldn't stick when you clicked away.
+func explicitSeason(r *http.Request) string {
+	if v := r.URL.Query().Get("season"); v != "" {
+		return v
+	}
+	v := r.URL.Query().Get("scope")
+	if v == "" || v == scopeAllSeasons || strings.HasPrefix(v, scopeGamePrefix) {
+		return ""
+	}
+	return v
 }
 
 // seasonContext bundles the values every season-scoped page needs: the season
@@ -58,11 +115,12 @@ func (h *Handlers) seasonContext(r *http.Request) (store.Season, []store.Season,
 // what the header's season picker needs. Every full-page render goes through
 // it, which is what makes the picker appear on all of them and nowhere else —
 // HTMX fragment handlers don't render the layout and don't call this.
-func (h *Handlers) pageContext(r *http.Request) (context.Context, store.Season, []store.Season, error) {
+func (h *Handlers) pageContext(w http.ResponseWriter, r *http.Request) (context.Context, store.Season, []store.Season, error) {
 	season, seasons, err := h.seasonContext(r)
 	if err != nil {
 		return r.Context(), store.Season{}, nil, err
 	}
+	h.rememberSeason(w, r, season)
 	ctx := view.WithSeasonNav(r.Context(), view.SeasonNav{
 		Current: season,
 		All:     seasons,
@@ -77,7 +135,7 @@ func (h *Handlers) Home(w http.ResponseWriter, r *http.Request) {
 	// The home page shows no season-scoped data, but it carries the picker like
 	// every other page: a selector that vanishes on one page reads as a bug,
 	// and choosing a season here sets up the pages it links to.
-	ctx, _, _, err := h.pageContext(r)
+	ctx, _, _, err := h.pageContext(w, r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -90,7 +148,7 @@ func (h *Handlers) Home(w http.ResponseWriter, r *http.Request) {
 // season picker, and every edit on the page carries that season with it so
 // looking at last season can't rewrite this one.
 func (h *Handlers) LineupPage(w http.ResponseWriter, r *http.Request) {
-	ctx, season, _, err := h.pageContext(r)
+	ctx, season, _, err := h.pageContext(w, r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -136,7 +194,7 @@ func (h *Handlers) LineupPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) SchedulePage(w http.ResponseWriter, r *http.Request) {
-	ctx, season, _, err := h.pageContext(r)
+	ctx, season, _, err := h.pageContext(w, r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -150,7 +208,7 @@ func (h *Handlers) SchedulePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) BeerPage(w http.ResponseWriter, r *http.Request) {
-	ctx, season, _, err := h.pageContext(r)
+	ctx, season, _, err := h.pageContext(w, r)
 	if err != nil {
 		serverError(w, err)
 		return

@@ -195,11 +195,24 @@ func recordLabel(games []store.Game) string {
 }
 
 // statsTitle names the stats page for the browser tab.
-func statsTitle(sel *store.Game) string {
-	if sel == nil {
-		return "Stats"
+func statsTitle(sel *store.Game, allSeasons bool) string {
+	switch {
+	case sel != nil:
+		return "Box Score · " + sel.Label()
+	case allSeasons:
+		return "Stats · All Seasons"
 	}
-	return "Box Score · " + sel.Label()
+	return "Stats"
+}
+
+// allSeasonsLabel is the widest option in the scope picker. It names the
+// seasons rather than saying "all", so the option says what it will add up.
+func allSeasonsLabel(seasons []store.Season) string {
+	names := make([]string, 0, len(seasons))
+	for _, s := range seasons {
+		names = append(names, s.Name)
+	}
+	return "All seasons — " + strings.Join(names, " + ")
 }
 
 // boxScoreLink points a schedule row at that game's stats. The season travels
@@ -234,15 +247,22 @@ func joinDot(parts []string) string { return strings.Join(parts, " · ") }
 // statsSubtitle is assembled in Go rather than in the template because templ
 // puts a space between adjacent expressions, which turns every " · " separator
 // into a wider gap than the one beside it.
-func statsSubtitle(season store.Season, sel *store.Game) string {
+func statsSubtitle(season store.Season, seasons []store.Season, sel *store.Game, allSeasons bool) string {
 	parts := []string{}
-	if sel != nil {
+	switch {
+	case sel != nil:
 		parts = append(parts, sel.Label(), matchup(*sel))
 		if r := sel.Result(); r != "" {
 			parts = append(parts, r)
 		}
 		parts = append(parts, season.Name)
-	} else {
+	case allSeasons:
+		names := make([]string, 0, len(seasons))
+		for _, s := range seasons {
+			names = append(names, s.Name)
+		}
+		parts = append(parts, "Batting", "career totals", strings.Join(names, " + "))
+	default:
 		parts = append(parts, "Batting", season.Name)
 		if season.League != "" {
 			parts = append(parts, season.League)

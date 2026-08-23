@@ -61,20 +61,6 @@ func seasonPickerSelected(ctx context.Context) store.Season {
 	return nav.Current
 }
 
-// seasonPickerNote is the league and field of the season on screen, so the
-// header says what you are looking at and not only which year it was.
-func seasonPickerNote(ctx context.Context) string {
-	nav, _ := seasonNav(ctx)
-	var parts []string
-	if nav.Current.League != "" {
-		parts = append(parts, nav.Current.League)
-	}
-	if nav.Current.Location != "" {
-		parts = append(parts, nav.Current.Location)
-	}
-	return joinDot(parts)
-}
-
 // seasonOptionLabel marks the season the site defaults to.
 func seasonOptionLabel(s store.Season) string {
 	if s.IsCurrent {

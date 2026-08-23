@@ -209,8 +209,8 @@ templ Login(errMsg string) {
 // counting stats; nothing here is stored. The key defines 27 stats, far too
 // wide to read at once, so columns are grouped and the view toggles between
 // them.
-templ Stats(season store.Season, games []store.Game, sel *store.Game, rows []store.PlayerBatting, team store.Batting) {
-	@Layout(statsTitle(sel)) {
+templ Stats(season store.Season, seasons []store.Season, games []store.Game, sel *store.Game, allSeasons bool, rows []store.PlayerBatting, team store.Batting) {
+	@Layout(statsTitle(sel, allSeasons)) {
 		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">
 			if sel != nil {
 				Box Score
@@ -218,12 +218,14 @@ templ Stats(season store.Season, games []store.Game, sel *store.Game, rows []sto
 				Stats
 			}
 		</h1>
-		<p class="mb-4 text-sm text-gray-400">{ statsSubtitle(season, sel) }</p>
-		@GamePicker(season, games, sel)
+		<p class="mb-4 text-sm text-gray-400">{ statsSubtitle(season, seasons, sel, allSeasons) }</p>
+		@ScopePicker(season, seasons, games, sel, allSeasons)
 		if len(rows) == 0 {
 			<p class="text-gray-400">
 				if sel != nil {
 					No stats recorded for { sel.Label() } vs { sel.Opponent } yet.
+				} else if allSeasons {
+					No stats recorded yet.
 				} else {
 					No stats recorded for { season.Name } yet.
 				}
@@ -275,7 +277,7 @@ templ Stats(season store.Season, games []store.Game, sel *store.Game, rows []sto
 				</table>
 			</div>
 			<script src="/static/sorttable.js"></script>
-			if auth.IsAdmin(ctx) {
+			if auth.IsAdmin(ctx) && !allSeasons {
 				<p class="mt-4 text-sm">
 					<a href={ sheetLink(season, sel) } class="border border-white px-3 py-1 text-xs font-bold uppercase tracking-wide hover:bg-white hover:text-black">
 						if sel != nil {

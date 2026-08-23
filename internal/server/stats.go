@@ -5,16 +5,19 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Adyn-Cox/CoorsHeavy/internal/store"
 	"github.com/Adyn-Cox/CoorsHeavy/internal/view"
 )
 
-// StatsPage is the batting table. With no ?game it shows season totals; with
-// one it shows that game's box score in the same table, so the schedule can
-// link straight to a night's numbers.
+// StatsPage is the batting table at one of three scopes, widest first:
+// ?seasons=all totals every season together, no ?game totals the season on
+// screen, and ?game=N is that night's box score. All three render through the
+// same columns — a box score is a season table over fewer games, and a career
+// table is one over more.
 func (h *Handlers) StatsPage(w http.ResponseWriter, r *http.Request) {
-	ctx, season, _, err := h.pageContext(r)
+	ctx, season, seasons, err := h.pageContext(w, r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -25,15 +28,24 @@ func (h *Handlers) StatsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Combining is only offered once there is something to combine.
+	allSeasons := allSeasonsParam(r) && len(seasons) > 1
+
 	// Looking the id up in this season's games is also the validation: a game
 	// from another season, or one that doesn't exist, falls back to totals
 	// rather than rendering an empty table under a stale header.
-	selected := findGame(games, gameParam(r))
+	var selected *store.Game
+	if !allSeasons {
+		selected = findGame(games, gameParam(r))
+	}
 
 	var rows []store.PlayerBatting
-	if selected != nil {
+	switch {
+	case selected != nil:
 		rows, err = h.store.BoxScore(r.Context(), selected.ID)
-	} else {
+	case allSeasons:
+		rows, err = h.store.SeasonBatting(r.Context(), 0)
+	default:
 		rows, err = h.store.SeasonBatting(r.Context(), season.ID)
 	}
 	if err != nil {
@@ -45,16 +57,35 @@ func (h *Handlers) StatsPage(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		team.Add(row.Batting)
 	}
-	_ = view.Stats(season, games, selected, rows, team).Render(ctx, w)
+	_ = view.Stats(season, seasons, games, selected, allSeasons, rows, team).Render(ctx, w)
 }
 
-// gameParam reads ?game=N, returning 0 when it is absent or unparseable.
+// The stats page's scope control carries three kinds of value in one <select>:
+// every season, one season (a bare id), or one game (prefixed, so a game id and
+// a season id can't be mistaken for each other).
+const (
+	scopeAllSeasons = "all"
+	scopeGamePrefix = "g"
+)
+
+// gameParam reads whichever parameter names a game — the scope control's
+// prefixed value, or the plain ?game=N that schedule rows link to — returning 0
+// when neither does.
 func gameParam(r *http.Request) int64 {
-	id, err := strconv.ParseInt(r.URL.Query().Get("game"), 10, 64)
+	raw := r.URL.Query().Get("game")
+	if v := r.URL.Query().Get("scope"); strings.HasPrefix(v, scopeGamePrefix) {
+		raw = strings.TrimPrefix(v, scopeGamePrefix)
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0
 	}
 	return id
+}
+
+// allSeasonsParam reports whether the widest scope was asked for.
+func allSeasonsParam(r *http.Request) bool {
+	return r.URL.Query().Get("scope") == scopeAllSeasons || r.URL.Query().Get("seasons") == scopeAllSeasons
 }
 
 // findGame returns the game with the given id, or nil. It searches the season's
@@ -73,7 +104,7 @@ func findGame(games []store.Game, id int64) *store.Game {
 
 // PlayerStatsPage is one player's game log plus season and career totals.
 func (h *Handlers) PlayerStatsPage(w http.ResponseWriter, r *http.Request) {
-	ctx, season, seasons, err := h.pageContext(r)
+	ctx, season, seasons, err := h.pageContext(w, r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -143,7 +174,7 @@ type statSheetPlayer struct {
 
 // StatSheetPage renders the transcription grid. Admin-only.
 func (h *Handlers) StatSheetPage(w http.ResponseWriter, r *http.Request) {
-	ctx, season, _, err := h.pageContext(r)
+	ctx, season, _, err := h.pageContext(w, r)
 	if err != nil {
 		serverError(w, err)
 		return

@@ -382,34 +382,45 @@ templ AddDonationForm() {
 	</form>
 }
 
-// GamePicker scopes the stats table to one game. The empty option drops the
-// parameter entirely rather than encoding "all" as a magic id, so the season
-// leaderboard stays the plain /stats URL people share.
-templ GamePicker(season store.Season, games []store.Game, sel *store.Game) {
-	if len(games) > 0 {
-		<form method="get" action="/stats" class="mb-4 flex flex-wrap items-center gap-2">
-			<input type="hidden" name="season" value={ store.Itoa(season.ID) }/>
-			<label for="game-select" class="text-xs font-semibold uppercase tracking-widest text-gray-500">Game</label>
-			<select
-				id="game-select"
-				name="game"
-				onchange="this.form.submit()"
-				class="border border-white bg-black px-2 py-1 text-sm text-white"
-			>
-				<option value="" selected?={ sel == nil }>Season totals</option>
-				for _, g := range games {
-					<option value={ itoa(g.ID) } selected?={ sel != nil && sel.ID == g.ID }>{ gameOption(g) }</option>
+// ScopePicker chooses how wide the stats table is: every season together, one
+// season, or one game. They are one control rather than three because they are
+// one question — how much to add up — and a reader picking "All seasons" from a
+// list that also holds "Thu 7/16" can see at once that they are ends of the
+// same scale.
+//
+// Game options are prefixed so one <select> can carry both kinds of value; the
+// handler splits them back apart.
+templ ScopePicker(season store.Season, seasons []store.Season, games []store.Game, sel *store.Game, allSeasons bool) {
+	<form method="get" action="/stats" class="mb-4 flex flex-wrap items-center gap-2">
+		<label for="scope-select" class="text-xs font-semibold uppercase tracking-widest text-gray-500">Showing</label>
+		<select
+			id="scope-select"
+			name="scope"
+			onchange="this.form.submit()"
+			class="border border-white bg-black px-2 py-1 text-sm text-white"
+		>
+			if len(seasons) > 1 {
+				<option value="all" selected?={ allSeasons }>{ allSeasonsLabel(seasons) }</option>
+				for _, sn := range seasons {
+					<option value={ store.Itoa(sn.ID) } selected?={ !allSeasons && sel == nil && sn.ID == season.ID }>
+						{ sn.Name + " — season totals" }
+					</option>
 				}
-			</select>
-			<noscript><button type="submit" class="border border-white px-2 py-1 text-sm">Go</button></noscript>
-			if sel != nil {
-				<a
-					href={ templ.SafeURL("/stats?season=" + store.Itoa(season.ID)) }
-					class="text-xs font-semibold uppercase tracking-widest text-gray-500 hover:text-white hover:underline"
-				>Season totals</a>
+			} else {
+				<option value={ store.Itoa(season.ID) } selected?={ sel == nil }>{ season.Name + " — season totals" }</option>
 			}
-		</form>
-	}
+			for _, g := range games {
+				<option value={ "g" + itoa(g.ID) } selected?={ sel != nil && sel.ID == g.ID }>{ gameOption(g) }</option>
+			}
+		</select>
+		<noscript><button type="submit" class="border border-white px-2 py-1 text-sm">Go</button></noscript>
+		if allSeasons || sel != nil {
+			<a
+				href={ templ.SafeURL("/stats?scope=" + store.Itoa(season.ID)) }
+				class="text-xs font-semibold uppercase tracking-widest text-gray-500 hover:text-white hover:underline"
+			>{ season.Name }</a>
+		}
+	</form>
 }
 
 // StatRow is one player's season line, built from the shared column
