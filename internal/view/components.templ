@@ -29,7 +29,7 @@ templ PlayerRow(idx int, pws store.PlayerWithSongs, spotifyEnabled bool) {
 			} else {
 				<span class="w-6"></span>
 			}
-			<span class="flex-1 font-semibold">{ pws.Name }</span>
+			@PlayerName(pws.RosterPlayer)
 			if auth.IsAdmin(ctx) {
 				<select
 					name={ "pos_" + itoa(pws.ID) }
@@ -42,7 +42,7 @@ templ PlayerRow(idx int, pws store.PlayerWithSongs, spotifyEnabled bool) {
 			} else {
 				<span class="border border-coors-red bg-black px-2 py-1 text-center text-sm font-mono text-white">{ displayPosition(pws.Position) }</span>
 			}
-			@AttendanceBadge(pws.Player)
+			@AttendanceBadge(pws.RosterPlayer)
 		</div>
 		<div class="mt-2 space-y-1 pl-5">
 			@SongSlot(pws.ID, 1, pws.Song1)
@@ -54,7 +54,7 @@ templ PlayerRow(idx int, pws store.PlayerWithSongs, spotifyEnabled bool) {
 // AttendanceBadge shows Here/Absent. For admins it is a button that toggles
 // attendance and swaps itself with the updated badge. The public only ever sees
 // "Here" (Absent is hidden from public view).
-templ AttendanceBadge(p store.Player) {
+templ AttendanceBadge(p store.RosterPlayer) {
 	if auth.IsAdmin(ctx) {
 		<button
 			id={ "att-" + itoa(p.ID) }
@@ -71,7 +71,7 @@ templ AttendanceBadge(p store.Player) {
 
 // BeerRow is one player's beer progress bar (racks out of 2). Admins get a
 // dropdown to set the amount, which swaps the whole row with the updated bar.
-templ BeerRow(p store.Player) {
+templ BeerRow(seasonID int64, p store.RosterPlayer) {
 	<div id={ "beer-" + itoa(p.ID) } class="border border-white bg-black p-3">
 		<div class="mb-1 flex items-baseline justify-between">
 			<span class="font-semibold">{ p.Name }</span>
@@ -85,7 +85,7 @@ templ BeerRow(p store.Player) {
 				<label class="uppercase tracking-wide">Racks:</label>
 				<select
 					name="racks"
-					hx-post={ "/players/" + itoa(p.ID) + "/beer" }
+					hx-post={ "/players/" + itoa(p.ID) + "/beer?season=" + store.Itoa(seasonID) }
 					hx-target={ "#beer-" + itoa(p.ID) }
 					hx-swap="outerHTML"
 					class="border border-white bg-black px-2 py-1 text-white"
@@ -106,7 +106,9 @@ templ BeerRow(p store.Player) {
 templ GameRow(g store.Game, opponents []string) {
 	<tr id={ "game-" + itoa(g.ID) }>
 		<td class="border border-white px-3 py-2 whitespace-nowrap">
-			{ g.Date }
+			<a href={ boxScoreLink(g) } class="underline decoration-gray-600 underline-offset-4 hover:decoration-white" title="Box score">
+				{ g.Label() }
+			</a>
 			if g.Playoff {
 				<span class="ml-2 border border-white px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide">Playoff</span>
 			}
@@ -131,6 +133,8 @@ templ GameRow(g store.Game, opponents []string) {
 		</td>
 		<td class="border border-white px-3 py-2 font-semibold">
 			if g.Playoff && auth.IsAdmin(ctx) {
+				// The matchup is the control here, so the date is the way into
+				// the box score for a playoff game an admin is still seeding.
 				<span class="mr-1">{ homeAway(g) }</span>
 				<select
 					name="opponent"
@@ -146,7 +150,9 @@ templ GameRow(g store.Game, opponents []string) {
 					}
 				</select>
 			} else {
-				{ matchup(g) }
+				<a href={ boxScoreLink(g) } class="underline decoration-gray-600 underline-offset-4 hover:decoration-white" title="Box score">
+					{ matchup(g) }
+				</a>
 			}
 		</td>
 		@ScoreCell(g)
@@ -355,6 +361,143 @@ templ AddDonationForm() {
 			<input type="checkbox" name="donated" value="true"/> Donated
 		</label>
 		<button type="submit" class="border border-white bg-white px-3 py-1 font-semibold text-black hover:bg-black hover:text-white">
+			Add
+		</button>
+	</form>
+}
+
+// SeasonSwitcher is the season dropdown shown above season-scoped pages. It
+// renders nothing until there is more than one season to switch between.
+templ SeasonSwitcher(current store.Season, seasons []store.Season, basePath string) {
+	if len(seasons) > 1 {
+		<form method="get" action={ templ.SafeURL(basePath) } class="mb-4 flex items-center gap-2">
+			<label for="season-select" class="text-xs font-semibold uppercase tracking-widest text-gray-500">Season</label>
+			<select
+				id="season-select"
+				name="season"
+				onchange="this.form.submit()"
+				class="border border-white bg-black px-2 py-1 text-sm text-white"
+			>
+				for _, s := range seasons {
+					<option value={ store.Itoa(s.ID) } selected?={ s.ID == current.ID }>
+						{ s.Name }
+						if s.IsCurrent {
+							{ " (current)" }
+						}
+					</option>
+				}
+			</select>
+			<noscript><button type="submit" class="border border-white px-2 py-1 text-sm">Go</button></noscript>
+		</form>
+	}
+}
+
+// GamePicker scopes the stats table to one game. The empty option drops the
+// parameter entirely rather than encoding "all" as a magic id, so the season
+// leaderboard stays the plain /stats URL people share.
+templ GamePicker(season store.Season, games []store.Game, sel *store.Game) {
+	if len(games) > 0 {
+		<form method="get" action="/stats" class="mb-4 flex flex-wrap items-center gap-2">
+			<input type="hidden" name="season" value={ store.Itoa(season.ID) }/>
+			<label for="game-select" class="text-xs font-semibold uppercase tracking-widest text-gray-500">Game</label>
+			<select
+				id="game-select"
+				name="game"
+				onchange="this.form.submit()"
+				class="border border-white bg-black px-2 py-1 text-sm text-white"
+			>
+				<option value="" selected?={ sel == nil }>Season totals</option>
+				for _, g := range games {
+					<option value={ itoa(g.ID) } selected?={ sel != nil && sel.ID == g.ID }>{ gameOption(g) }</option>
+				}
+			</select>
+			<noscript><button type="submit" class="border border-white px-2 py-1 text-sm">Go</button></noscript>
+			if sel != nil {
+				<a
+					href={ templ.SafeURL("/stats?season=" + store.Itoa(season.ID)) }
+					class="text-xs font-semibold uppercase tracking-widest text-gray-500 hover:text-white hover:underline"
+				>Season totals</a>
+			}
+		</form>
+	}
+}
+
+// StatRow is one player's season line, built from the shared column
+// definitions so it can never drift out of step with the header. Players short
+// of the qualifying at-bat count are marked rather than hidden — a beer league
+// wants to see everyone, it just shouldn't crown a batting champ off four AB.
+// The table context carries the column leaders (marked red) and whether this is
+// a season table. A box score isn't: a qualifying at-bat count is a season-long
+// idea, and starring every player on a single night says nothing.
+templ StatRow(row store.PlayerBatting, t statTable) {
+	<tr class={ rowClass(row) }>
+		for i, c := range statColumns() {
+			<td data-group={ c.Group } class={ cellClass(c, row, t.leads(c, row)) }>
+				if i == 0 && !isTeamTotals(row) {
+					<a href={ templ.SafeURL("/stats/" + row.Slug) } class="hover:underline">{ row.Name }</a>
+					if t.Season && !qualified(row.Batting) {
+						<span class="ml-1 text-xs text-gray-600" title="Not enough at-bats to qualify for rate leaders">*</span>
+					}
+				} else {
+					{ cellText(c, row) }
+				}
+			</td>
+		}
+	</tr>
+}
+
+// PlayerName is the lineup's name cell. Admins get an inline editor — the seed
+// roster contains two Patty and two Parker, and until they are told apart four
+// players are ambiguous on the stat sheet and in any name-keyed CSV.
+//
+// The slug is shown while editing because it, not the name, is what the stats
+// CSV keys on: renaming here is cosmetic and won't break lines already typed.
+templ PlayerName(p store.RosterPlayer) {
+	<span id={ "name-" + itoa(p.ID) } class="flex-1">
+		if auth.IsAdmin(ctx) {
+			<form
+				hx-post={ "/players/" + itoa(p.ID) + "/name" }
+				hx-target={ "#name-" + itoa(p.ID) }
+				hx-swap="outerHTML"
+				class="flex items-center gap-1"
+			>
+				<input
+					type="text"
+					name="name"
+					value={ p.Name }
+					aria-label={ "Name for " + p.Slug }
+					class="w-28 border border-transparent bg-black px-1 py-0.5 font-semibold text-white hover:border-gray-600 focus:border-white focus:outline-none"
+				/>
+				<button type="submit" class="border border-white px-1 py-0.5 text-[10px] uppercase hover:bg-white hover:text-black">Save</button>
+				<span class="font-mono text-[10px] text-gray-600">{ p.Slug }</span>
+			</form>
+		} else {
+			<span class="font-semibold">{ p.Name }</span>
+		}
+	</span>
+}
+
+// AddPlayerForm adds someone to the current season's roster. New players land
+// in the Absent section un-numbered: they're on the team, but not in tonight's
+// batting order until an admin says so.
+templ AddPlayerForm() {
+	<form
+		hx-post="/players"
+		hx-target="#absent-list"
+		hx-swap="beforeend"
+		hx-on::after-request="if(event.detail.successful) this.reset()"
+		class="mt-4 flex flex-wrap items-center gap-2 border border-gray-700 p-3"
+	>
+		<label for="new-player" class="text-xs font-semibold uppercase tracking-widest text-gray-500">Add player</label>
+		<input
+			id="new-player"
+			type="text"
+			name="name"
+			required
+			placeholder="Name"
+			class="border border-white bg-black px-2 py-1 text-white"
+		/>
+		<button type="submit" class="border border-white px-3 py-1 text-xs font-bold uppercase tracking-wide hover:bg-white hover:text-black">
 			Add
 		</button>
 	</form>

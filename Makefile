@@ -1,4 +1,4 @@
-.PHONY: run dev build generate test tidy docker tools clean
+.PHONY: run dev build generate test tidy docker tools clean import-schedule import-stats sheet
 
 ## generate: compile .templ files into Go (*_templ.go)
 generate:
@@ -16,9 +16,17 @@ dev:
 build: generate
 	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/web ./cmd/web
 
-## import-schedule: wipe & reload the schedule from internal/store/seed.go
+## import-schedule: load a season's schedule from CSV (SEASON=1 by default)
 import-schedule:
-	go run ./cmd/import-schedule
+	go run ./cmd/import-schedule -season $(or $(SEASON),1)
+
+## import-stats: load batting lines from CSV (make import-stats FILE=stats.csv)
+import-stats:
+	go run ./cmd/import-stats -season $(or $(SEASON),1) -file $(FILE)
+
+## sheet: run the site locally so you can type stats at /statsheet
+##        (reached from Stats > Enter stats, or a game's box score)
+sheet: run
 
 ## test: run all tests
 test:
