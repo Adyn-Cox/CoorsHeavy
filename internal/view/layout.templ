@@ -1,6 +1,9 @@
 package view
 
-import "github.com/Adyn-Cox/CoorsHeavy/internal/auth"
+import (
+	"github.com/Adyn-Cox/CoorsHeavy/internal/auth"
+	"github.com/Adyn-Cox/CoorsHeavy/internal/store"
+)
 
 // Layout is the black background / white text shell shared by every page: header
 // with softball logo + nav + login state, then page content. Loads HTMX,
@@ -47,6 +50,7 @@ templ Layout(title string) {
 						}
 					</nav>
 				</div>
+				@seasonPicker()
 			</header>
 			<main class="mx-auto max-w-4xl px-4 py-8">
 				{ children... }
@@ -73,4 +77,41 @@ templ Layout(title string) {
 			</script>
 		</body>
 	</html>
+}
+
+// seasonPicker is the season selector under the header, on every page. It sits
+// in the layout rather than on each page because a season is a property of the
+// whole site view, not of one table — and because a picker that appears on some
+// pages and not others reads as a bug.
+//
+// It submits back to the page you are on, so switching seasons keeps you in
+// place. Nothing is shown until a second season exists.
+templ seasonPicker() {
+	if showSeasonPicker(ctx) {
+		<div class="border-t border-gray-800">
+			<form
+				method="get"
+				action={ templ.SafeURL(seasonPickerPath(ctx)) }
+				class="mx-auto flex max-w-4xl flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2"
+			>
+				<label for="season-nav" class="text-xs font-semibold uppercase tracking-widest text-gray-500">Season</label>
+				<select
+					id="season-nav"
+					name="season"
+					onchange="this.form.submit()"
+					class="border border-white bg-black px-2 py-1 text-sm font-semibold text-white"
+				>
+					for _, s := range seasonPickerOptions(ctx) {
+						<option value={ store.Itoa(s.ID) } selected?={ s.ID == seasonPickerSelected(ctx).ID }>
+							{ seasonOptionLabel(s) }
+						</option>
+					}
+				</select>
+				if seasonPickerNote(ctx) != "" {
+					<span class="text-xs text-gray-500">{ seasonPickerNote(ctx) }</span>
+				}
+				<noscript><button type="submit" class="border border-white px-2 py-1 text-xs uppercase">Go</button></noscript>
+			</form>
+		</div>
+	}
 }

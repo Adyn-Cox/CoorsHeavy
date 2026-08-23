@@ -10,7 +10,7 @@ import (
 // player ID so a drag-reorder POSTs the IDs in their new order. Admins see a
 // drag handle, a position dropdown, and a clickable attendance badge; the public
 // sees the same data read-only — with Bench/Absent hidden.
-templ PlayerRow(idx int, pws store.PlayerWithSongs, spotifyEnabled bool) {
+templ PlayerRow(seasonID int64, idx int, pws store.PlayerWithSongs, spotifyEnabled bool) {
 	<div
 		id={ "player-" + itoa(pws.ID) }
 		class="border border-white bg-black px-3 py-2"
@@ -42,7 +42,7 @@ templ PlayerRow(idx int, pws store.PlayerWithSongs, spotifyEnabled bool) {
 			} else {
 				<span class="border border-coors-red bg-black px-2 py-1 text-center text-sm font-mono text-white">{ displayPosition(pws.Position) }</span>
 			}
-			@AttendanceBadge(pws.RosterPlayer)
+			@AttendanceBadge(seasonID, pws.RosterPlayer)
 		</div>
 		<div class="mt-2 space-y-1 pl-5">
 			@SongSlot(pws.ID, 1, pws.Song1)
@@ -54,11 +54,11 @@ templ PlayerRow(idx int, pws store.PlayerWithSongs, spotifyEnabled bool) {
 // AttendanceBadge shows Here/Absent. For admins it is a button that toggles
 // attendance and swaps itself with the updated badge. The public only ever sees
 // "Here" (Absent is hidden from public view).
-templ AttendanceBadge(p store.RosterPlayer) {
+templ AttendanceBadge(seasonID int64, p store.RosterPlayer) {
 	if auth.IsAdmin(ctx) {
 		<button
 			id={ "att-" + itoa(p.ID) }
-			hx-post={ "/players/" + itoa(p.ID) + "/attendance" }
+			hx-post={ "/players/" + itoa(p.ID) + "/attendance?season=" + store.Itoa(seasonID) }
 			hx-swap="outerHTML"
 			class={ attBadgeClass(p.Attended) + " cursor-pointer" }
 		>
@@ -123,19 +123,35 @@ templ GameRow(g store.Game, opponents []string) {
 					class="border border-white bg-black px-1 py-0.5 text-white"
 					aria-label="Start time"
 				>
+					// A blank time is a real state for a playoff game, and
+					// without an option for it the dropdown would sit on 6:00
+					// PM and read as though a time had been chosen.
+					<option value="" selected?={ g.Time == "" }>TBD</option>
 					for _, t := range store.GameTimes {
 						<option value={ t } selected?={ t == g.Time }>{ t }</option>
 					}
 				</select>
 			} else {
-				{ g.Time }
+				{ gameTime(g) }
 			}
 		</td>
 		<td class="border border-white px-3 py-2 font-semibold">
 			if g.Playoff && auth.IsAdmin(ctx) {
 				// The matchup is the control here, so the date is the way into
 				// the box score for a playoff game an admin is still seeding.
-				<span class="mr-1">{ homeAway(g) }</span>
+				<select
+					name="home"
+					hx-post={ "/games/" + itoa(g.ID) + "/matchup" }
+					hx-target={ "#game-" + itoa(g.ID) }
+					hx-swap="outerHTML"
+					class="mr-1 border border-white bg-black px-1 py-0.5 text-white"
+					aria-label="Home or away"
+				>
+					// "@" is templ's component-call sigil, so the away label has
+					// to come through as a Go string rather than literal text.
+					<option value="1" selected?={ g.Home }>vs</option>
+					<option value="0" selected?={ !g.Home }>{ "@" }</option>
+				</select>
 				<select
 					name="opponent"
 					hx-post={ "/games/" + itoa(g.ID) + "/matchup" }
@@ -366,32 +382,6 @@ templ AddDonationForm() {
 	</form>
 }
 
-// SeasonSwitcher is the season dropdown shown above season-scoped pages. It
-// renders nothing until there is more than one season to switch between.
-templ SeasonSwitcher(current store.Season, seasons []store.Season, basePath string) {
-	if len(seasons) > 1 {
-		<form method="get" action={ templ.SafeURL(basePath) } class="mb-4 flex items-center gap-2">
-			<label for="season-select" class="text-xs font-semibold uppercase tracking-widest text-gray-500">Season</label>
-			<select
-				id="season-select"
-				name="season"
-				onchange="this.form.submit()"
-				class="border border-white bg-black px-2 py-1 text-sm text-white"
-			>
-				for _, s := range seasons {
-					<option value={ store.Itoa(s.ID) } selected?={ s.ID == current.ID }>
-						{ s.Name }
-						if s.IsCurrent {
-							{ " (current)" }
-						}
-					</option>
-				}
-			</select>
-			<noscript><button type="submit" class="border border-white px-2 py-1 text-sm">Go</button></noscript>
-		</form>
-	}
-}
-
 // GamePicker scopes the stats table to one game. The empty option drops the
 // parameter entirely rather than encoding "all" as a magic id, so the season
 // leaderboard stays the plain /stats URL people share.
@@ -480,9 +470,9 @@ templ PlayerName(p store.RosterPlayer) {
 // AddPlayerForm adds someone to the current season's roster. New players land
 // in the Absent section un-numbered: they're on the team, but not in tonight's
 // batting order until an admin says so.
-templ AddPlayerForm() {
+templ AddPlayerForm(seasonID int64) {
 	<form
-		hx-post="/players"
+		hx-post={ "/players?season=" + store.Itoa(seasonID) }
 		hx-target="#absent-list"
 		hx-swap="beforeend"
 		hx-on::after-request="if(event.detail.successful) this.reset()"

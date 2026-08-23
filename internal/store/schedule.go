@@ -24,7 +24,9 @@ const displayDate = "Mon 1/2"
 // binary is what lets `fly ssh console -C /app/import-schedule` work: the
 // production image is distroless and has no files to read.
 func EmbeddedSchedule(seasonName string) ([]byte, error) {
-	name := "data/schedule-" + seasonName + ".csv"
+	// Slugified so a season named "Fall 2026" finds schedule-fall-2026.csv
+	// rather than a file with a space in its name.
+	name := "data/schedule-" + Slugify(seasonName) + ".csv"
 	b, err := scheduleFS.ReadFile(name)
 	if err != nil {
 		return nil, fmt.Errorf("no schedule baked in for season %q (looked for %s): %w", seasonName, name, err)

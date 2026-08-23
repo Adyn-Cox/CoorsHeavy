@@ -228,6 +228,9 @@ func gameOption(g store.Game) string {
 	return label
 }
 
+// joinDot is the site's separator for a run of short facts.
+func joinDot(parts []string) string { return strings.Join(parts, " · ") }
+
 // statsSubtitle is assembled in Go rather than in the template because templ
 // puts a space between adjacent expressions, which turns every " · " separator
 // into a wider gap than the one beside it.
@@ -245,5 +248,14 @@ func statsSubtitle(season store.Season, sel *store.Game) string {
 			parts = append(parts, season.League)
 		}
 	}
-	return strings.Join(parts, " · ")
+	return joinDot(parts)
+}
+
+// gameTime renders a start time, or TBD for a playoff game that hasn't been
+// seeded. A blank cell would read as missing data rather than as "not yet set".
+func gameTime(g store.Game) string {
+	if g.Time == "" {
+		return store.TBDOpponent
+	}
+	return g.Time
 }

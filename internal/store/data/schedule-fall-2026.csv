@@ -1,0 +1,23 @@
+# Coors Heavy — Fall 2026, Thursdays at Stazio #4.
+#
+# Nine regular-season games, then a single playoff round on 10/29. Only Coors
+# Heavy's own games are here; the league plays four a night on the same field.
+#
+# date is ISO; the "Thu 8/27" display label is derived from it at import time.
+# home: 1 when Coors Heavy is the home team. playoff: 1 for post-season games.
+#
+# The 10/29 row is deliberately blank: the bracket seeds 2v1 at 7:00, 4v3 at
+# 8:00, 6v5 at 6:00 and 8v7 at 9:00, so neither the opponent, the start time
+# nor who bats last is known until the regular season ends. Set them on the
+# schedule page once the seeding is out.
+date,time,opponent,home,location,played,us,them,playoff
+2026-08-27,6:00 PM,The MasterBatters,1,Stazio #4,0,,,0
+2026-09-03,8:00 PM,City Slackers,0,Stazio #4,0,,,0
+2026-09-10,6:00 PM,Big Sticks,1,Stazio #4,0,,,0
+2026-09-17,7:00 PM,LBAs,1,Stazio #4,0,,,0
+2026-09-24,8:00 PM,The D.O.L.L.S,0,Stazio #4,0,,,0
+2026-10-01,6:00 PM,The Rez,0,Stazio #4,0,,,0
+2026-10-08,7:00 PM,Hailraisers,1,Stazio #4,0,,,0
+2026-10-15,9:00 PM,The MasterBatters,0,Stazio #4,0,,,0
+2026-10-22,9:00 PM,City Slackers,1,Stazio #4,0,,,0
+2026-10-29,,,1,Stazio #4,0,,,1

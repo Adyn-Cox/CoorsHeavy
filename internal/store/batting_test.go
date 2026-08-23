@@ -221,22 +221,44 @@ func TestFormatGameDate(t *testing.T) {
 	}
 }
 
-func TestEmbeddedScheduleIsEveryThursday(t *testing.T) {
-	b, err := EmbeddedSchedule("2026")
+// Every embedded schedule must be Thursdays only. This is the check that
+// caught a whole season written against the wrong year: 2025-05-14 is a
+// Wednesday, and the dates only reveal it once formatted.
+func TestEmbeddedSchedulesAreEveryThursday(t *testing.T) {
+	for _, season := range []struct {
+		name  string
+		games int
+	}{
+		{"Summer 2026", 12},
+		{"Fall 2026", 10},
+	} {
+		b, err := EmbeddedSchedule(season.name)
+		if err != nil {
+			t.Fatalf("EmbeddedSchedule(%q): %v", season.name, err)
+		}
+		games, err := ParseScheduleCSV(strings.NewReader(string(b)), 1)
+		if err != nil {
+			t.Fatalf("ParseScheduleCSV(%q): %v", season.name, err)
+		}
+		if len(games) != season.games {
+			t.Fatalf("%s: got %d games, want %d", season.name, len(games), season.games)
+		}
+		for _, g := range games {
+			if !strings.HasPrefix(g.Date, "Thu ") {
+				t.Errorf("%s: %s (%s) is not a Thursday — check the year", season.name, g.PlayedOn, g.Date)
+			}
+		}
+	}
+}
+
+func TestEmbeddedSummerScheduleMatchesTheFinishedSeason(t *testing.T) {
+	b, err := EmbeddedSchedule("Summer 2026")
 	if err != nil {
 		t.Fatalf("EmbeddedSchedule: %v", err)
 	}
 	games, err := ParseScheduleCSV(strings.NewReader(string(b)), 1)
 	if err != nil {
 		t.Fatalf("ParseScheduleCSV: %v", err)
-	}
-	if len(games) != 12 {
-		t.Fatalf("got %d games, want 12", len(games))
-	}
-	for _, g := range games {
-		if !strings.HasPrefix(g.Date, "Thu ") {
-			t.Errorf("%s (%s) is not a Thursday — check the year", g.PlayedOn, g.Date)
-		}
 	}
 	if games[0].Opponent != "Hailraisers" || games[0].Home || !games[0].Played {
 		t.Errorf("first game = %+v", games[0])
@@ -246,6 +268,40 @@ func TestEmbeddedScheduleIsEveryThursday(t *testing.T) {
 	}
 	if !games[11].Playoff {
 		t.Error("last game should be a playoff game")
+	}
+}
+
+// The fall playoff row carries no opponent and no time: the bracket seeds by
+// final standing, so both are unknown until the regular season ends.
+func TestFallPlayoffRowIsUnseeded(t *testing.T) {
+	b, err := EmbeddedSchedule("Fall 2026")
+	if err != nil {
+		t.Fatalf("EmbeddedSchedule: %v", err)
+	}
+	games, err := ParseScheduleCSV(strings.NewReader(string(b)), 2)
+	if err != nil {
+		t.Fatalf("ParseScheduleCSV: %v", err)
+	}
+	last := games[len(games)-1]
+	if !last.Playoff {
+		t.Fatal("last fall game should be a playoff game")
+	}
+	if last.Opponent != TBDOpponent {
+		t.Errorf("playoff opponent = %q, want %q", last.Opponent, TBDOpponent)
+	}
+	if last.Time != "" {
+		t.Errorf("playoff time = %q, want blank until seeding", last.Time)
+	}
+	// Two of the nine regular-season games are in the 9 PM slot the fall
+	// league added, so ValidGameTime has to accept it.
+	var nine int
+	for _, g := range games {
+		if g.Time == "9:00 PM" {
+			nine++
+		}
+	}
+	if nine != 2 {
+		t.Errorf("got %d games at 9:00 PM, want 2", nine)
 	}
 }
 

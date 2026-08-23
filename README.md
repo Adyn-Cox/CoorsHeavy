@@ -27,7 +27,7 @@ editing.
   grid at `/statsheet` for admins.
 - **Seasons** — every game, donation and roster spot belongs to a season.
   Opening a new one never touches the old; past seasons stay viewable via the
-  season switcher on each page.
+  season picker in the header, on every page.
 - **Auth** — one account from env vars; public read-only, login to edit.
 
 ## Stack
@@ -97,25 +97,56 @@ page automatically (it's hidden until the file exists).
 
 ## Seasons
 
-Every game, donation and roster spot belongs to a season, so a new year is
-purely additive — season 1 keeps every row it had and stays reachable from the
-season switcher on `/schedule`, `/stats` and `/beer`.
+Every game, donation and roster spot belongs to a season, so a new one is purely
+additive — the old season keeps every row it had and stays reachable forever.
 
-The 2026 season is season 1: 10 league games plus 2 playoff games (Thursday
-Men's E Rec D2, Stazio #2), in `internal/store/data/schedule-2026.csv`.
+| Season | | |
+|---|---|---|
+| 1 | **Summer 2026** | Thursday Men's E Rec D2, Stazio #2 · 10 league + 2 playoff games |
+| 2 | **Fall 2026** | Stazio #4 · 9 league + 1 playoff game |
 
-Open the next season:
+The picker lives in the **header, on every page**, and submits back to the page
+you are on so switching seasons keeps you in place. It is in the layout rather
+than on each page for two reasons: a season is a property of the whole view
+rather than of one table, and a selector that appears on some pages and not
+others reads as a bug. It renders nothing until a second season exists.
+
+`/lineup` defaults to the current season but follows the picker like everything
+else, and each of its edits carries that season in the URL — so looking at last
+season can't rewrite this one.
+
+### Opening a season
 
 ```bash
-go run ./cmd/new-season -name 2027 -year 2027 \
-    -league "Thursday Men's E Rec D2" -location "Stazio #2" -carry-roster
-go run ./cmd/import-schedule -season 2 -file data/schedule-2027.csv
+go run ./cmd/new-season -name "Fall 2026" -year 2026 -location "Stazio #4" \
+    -roster "Luke,Sam,Adyn,Tanner,..."
+go run ./cmd/import-schedule -season 2
 ```
 
-`-carry-roster` copies the roster forward keeping positions and batting order,
-resetting beer and attendance. `-make-current` (on by default) moves which
-season the site shows by default. In production: `fly ssh console -C
-"/app/new-season -name 2027 -year 2027 -carry-roster"`.
+`-roster` takes the season's players in batting order. **A name that matches an
+existing player's slug is that player** — reusing the row is what keeps career
+stats attached to one person across seasons. Anything else is a new player.
+Matching is on the exact slug and nothing fuzzier, because a wrong guess makes a
+duplicate person whose stats are split in two forever; `-dry-run` prints the
+returning/new split so you can check before it happens.
+
+That means casual spellings have to be resolved before they're passed in: the
+fall list arrived as `forest`, `skyler` and `jon`, which are the existing
+`forrest`, `sky` and `john`. Feeding those through verbatim would have made five
+new players, not two.
+
+`-carry-roster` is the alternative when everyone returns: it copies the previous
+roster forward keeping positions and batting order, resetting beer and
+attendance. `-make-current` (on by default) moves which season the site shows.
+
+`-id` edits an existing season instead of creating one, applying only the flags
+you actually pass:
+
+```bash
+go run ./cmd/new-season -id 1 -name "Summer 2026"     # rename, nothing else moves
+```
+
+In production: `fly ssh console -C "/app/new-season -name 'Fall 2026' ..."`.
 
 ## Schedule
 
@@ -131,6 +162,15 @@ date,time,opponent,home,location,played,us,them,playoff
 so the two can never disagree. (Storing only the label is what hid the fact that
 those dates are Thursdays in **2026**, not 2025.) Columns are matched by header
 name, so order doesn't matter and extra columns are ignored.
+
+Files are named after the slugified season: `Fall 2026` loads
+`internal/store/data/schedule-fall-2026.csv`. Only Coors Heavy's own games go in
+one — the league plays four a night on the same field.
+
+A playoff row is written blank on purpose. The fall bracket seeds 2v1 at 7:00,
+4v3 at 8:00, 6v5 at 6:00 and 8v7 at 9:00, so the opponent, the start time **and
+who bats last** all wait on the final standings; all three are dropdowns on the
+schedule page for admins, and the time offers TBD so it can be put back.
 
 ```bash
 make import-schedule                                  # season 1, embedded CSV

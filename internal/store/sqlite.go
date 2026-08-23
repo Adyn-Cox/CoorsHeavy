@@ -238,6 +238,23 @@ func (s *SQLite) CreateSeason(ctx context.Context, sn Season) (Season, error) {
 	return sn, err
 }
 
+// UpdateSeason rewrites a season's details in place. The id is untouched, so
+// every game, donation and roster spot that points at it stays put — renaming
+// "2026" to "Summer 2026" is a label change, not a migration.
+func (s *SQLite) UpdateSeason(ctx context.Context, sn Season) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE seasons SET name = ?, year = ?, league = ?, location = ?, notes = ?
+		WHERE id = ?`,
+		sn.Name, sn.Year, sn.League, sn.Location, sn.Notes, sn.ID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SetCurrentSeason moves the current flag, in one transaction so there is never
 // a moment with two current seasons or none.
 func (s *SQLite) SetCurrentSeason(ctx context.Context, id int64) error {
@@ -549,10 +566,10 @@ func (s *SQLite) DeleteGame(ctx context.Context, id int64) error {
 	return err
 }
 
-func (s *SQLite) UpdateGameMatchup(ctx context.Context, id int64, gameTime, opponent string) error {
+func (s *SQLite) UpdateGameMatchup(ctx context.Context, id int64, gameTime, opponent string, home bool) error {
 	_, err := s.db.ExecContext(ctx,
-		"UPDATE games SET game_time = ?, opponent = ? WHERE id = ?",
-		gameTime, opponent, id)
+		"UPDATE games SET game_time = ?, opponent = ?, home = ? WHERE id = ?",
+		gameTime, opponent, boolToInt(home), id)
 	return err
 }
 

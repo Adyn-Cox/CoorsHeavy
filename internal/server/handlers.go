@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -53,16 +54,43 @@ func (h *Handlers) seasonContext(r *http.Request) (store.Season, []store.Season,
 	return sn, all, err
 }
 
+// pageContext resolves the season for a page and returns a context carrying
+// what the header's season picker needs. Every full-page render goes through
+// it, which is what makes the picker appear on all of them and nowhere else —
+// HTMX fragment handlers don't render the layout and don't call this.
+func (h *Handlers) pageContext(r *http.Request) (context.Context, store.Season, []store.Season, error) {
+	season, seasons, err := h.seasonContext(r)
+	if err != nil {
+		return r.Context(), store.Season{}, nil, err
+	}
+	ctx := view.WithSeasonNav(r.Context(), view.SeasonNav{
+		Current: season,
+		All:     seasons,
+		Path:    r.URL.Path,
+	})
+	return ctx, season, seasons, nil
+}
+
 // --- Pages ------------------------------------------------------------------
 
 func (h *Handlers) Home(w http.ResponseWriter, r *http.Request) {
-	_ = view.Home().Render(r.Context(), w)
+	// The home page shows no season-scoped data, but it carries the picker like
+	// every other page: a selector that vanishes on one page reads as a bug,
+	// and choosing a season here sets up the pages it links to.
+	ctx, _, _, err := h.pageContext(r)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	_ = view.Home().Render(ctx, w)
 }
 
-// LineupPage always shows the current season: a lineup card is about tonight's
-// game, so there is nothing to switch between.
+// LineupPage shows one season's batting order. It defaults to the current
+// season — a lineup card is about tonight's game — but honours the header's
+// season picker, and every edit on the page carries that season with it so
+// looking at last season can't rewrite this one.
 func (h *Handlers) LineupPage(w http.ResponseWriter, r *http.Request) {
-	season, err := h.store.CurrentSeason(r.Context())
+	ctx, season, _, err := h.pageContext(r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -104,11 +132,11 @@ func (h *Handlers) LineupPage(w http.ResponseWriter, r *http.Request) {
 			absent = append(absent, pws)
 		}
 	}
-	_ = view.Lineup(present, absent, h.cfg.SpotifyEnabled()).Render(r.Context(), w)
+	_ = view.Lineup(season, present, absent, h.cfg.SpotifyEnabled()).Render(ctx, w)
 }
 
 func (h *Handlers) SchedulePage(w http.ResponseWriter, r *http.Request) {
-	season, seasons, err := h.seasonContext(r)
+	ctx, season, _, err := h.pageContext(r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -118,11 +146,11 @@ func (h *Handlers) SchedulePage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	_ = view.Schedule(season, seasons, games, store.Opponents(games)).Render(r.Context(), w)
+	_ = view.Schedule(season, games, store.Opponents(games)).Render(ctx, w)
 }
 
 func (h *Handlers) BeerPage(w http.ResponseWriter, r *http.Request) {
-	season, seasons, err := h.seasonContext(r)
+	ctx, season, _, err := h.pageContext(r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -137,7 +165,7 @@ func (h *Handlers) BeerPage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	_ = view.Beer(season, seasons, players, donations).Render(r.Context(), w)
+	_ = view.Beer(season, players, donations).Render(ctx, w)
 }
 
 // --- Auth -------------------------------------------------------------------
@@ -193,7 +221,7 @@ func (h *Handlers) SaveLineup(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	season, err := h.store.CurrentSeason(r.Context())
+	season, err := h.season(r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -202,10 +230,12 @@ func (h *Handlers) SaveLineup(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	http.Redirect(w, r, "/lineup", http.StatusSeeOther)
+	// Back to the season that was being edited, not whichever one is current.
+	http.Redirect(w, r, "/lineup?season="+store.Itoa(season.ID), http.StatusSeeOther)
 }
 
-// AddPlayer creates a person and puts them on the current season's roster.
+// AddPlayer creates a person and puts them on the roster of the season being
+// viewed.
 // They start benched and absent, so they land in the Absent section until
 // someone marks them here — same as anyone who misses a week.
 func (h *Handlers) AddPlayer(w http.ResponseWriter, r *http.Request) {
@@ -214,7 +244,7 @@ func (h *Handlers) AddPlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name is required", http.StatusBadRequest)
 		return
 	}
-	season, err := h.store.CurrentSeason(r.Context())
+	season, err := h.season(r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -234,7 +264,7 @@ func (h *Handlers) AddPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// idx -1 renders an un-numbered row: they're not in the batting order yet.
-	_ = view.PlayerRow(-1, store.PlayerWithSongs{RosterPlayer: rp}, h.cfg.SpotifyEnabled()).
+	_ = view.PlayerRow(season.ID, -1, store.PlayerWithSongs{RosterPlayer: rp}, h.cfg.SpotifyEnabled()).
 		Render(r.Context(), w)
 }
 
@@ -318,7 +348,7 @@ func (h *Handlers) ToggleAttendance(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	_ = view.AttendanceBadge(p).Render(r.Context(), w)
+	_ = view.AttendanceBadge(season.ID, p).Render(r.Context(), w)
 }
 
 func (h *Handlers) SetBeer(w http.ResponseWriter, r *http.Request) {
@@ -426,10 +456,12 @@ func (h *Handlers) SetMatchup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gameTime, opponent := g.Time, g.Opponent
+	gameTime, opponent, home := g.Time, g.Opponent, g.Home
 	opponents := store.Opponents(games)
 	if v, ok := formValue(r, "time"); ok {
-		if !store.ValidGameTime(v) {
+		// Blank is allowed: it means the slot is still TBD, which is where a
+		// playoff game starts and where it can be put back.
+		if v != "" && !store.ValidGameTime(v) {
 			http.Error(w, "invalid start time", http.StatusBadRequest)
 			return
 		}
@@ -442,8 +474,13 @@ func (h *Handlers) SetMatchup(w http.ResponseWriter, r *http.Request) {
 		}
 		opponent = v
 	}
+	// The higher seed is the home team, so who bats last isn't known when the
+	// schedule is loaded either.
+	if v, ok := formValue(r, "home"); ok {
+		home = v == "1"
+	}
 
-	if err := h.store.UpdateGameMatchup(r.Context(), id, gameTime, opponent); err != nil {
+	if err := h.store.UpdateGameMatchup(r.Context(), id, gameTime, opponent, home); err != nil {
 		serverError(w, err)
 		return
 	}

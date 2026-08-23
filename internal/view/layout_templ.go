@@ -8,7 +8,10 @@ package view
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "github.com/Adyn-Cox/CoorsHeavy/internal/auth"
+import (
+	"github.com/Adyn-Cox/CoorsHeavy/internal/auth"
+	"github.com/Adyn-Cox/CoorsHeavy/internal/store"
+)
 
 // Layout is the black background / white text shell shared by every page: header
 // with softball logo + nav + login state, then page content. Loads HTMX,
@@ -41,7 +44,7 @@ func Layout(title string) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/layout.templ`, Line: 14, Col: 17}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/layout.templ`, Line: 17, Col: 17}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -62,7 +65,15 @@ func Layout(title string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</nav></div></header><main class=\"mx-auto max-w-4xl px-4 py-8\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</nav></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = seasonPicker().Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</header><main class=\"mx-auto max-w-4xl px-4 py-8\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -70,9 +81,129 @@ func Layout(title string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</main><script>\n\t\t\t\t// Initialise drag-and-drop on any .sortable container (admin lineup).\n\t\t\t\thtmx.onLoad(function (content) {\n\t\t\t\t\tcontent.querySelectorAll('.sortable').forEach(function (el) {\n\t\t\t\t\t\tif (el._sortable) return;\n\t\t\t\t\t\tel._sortable = new Sortable(el, { animation: 150, handle: '.drag-handle' });\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t</script><!-- Song search modal --><div id=\"song-modal\" class=\"hidden fixed inset-0 z-50 flex items-center justify-center\" style=\"background:rgba(0,0,0,0.85)\" onclick=\"if(event.target===this)closeSongModal()\"><div id=\"song-modal-inner\" class=\"w-full max-w-md border-2 border-white bg-black p-6 mx-4\"></div></div><script>\n\t\t\t\tfunction openSongModal() { document.getElementById('song-modal').classList.remove('hidden'); }\n\t\t\t\tfunction closeSongModal() {\n\t\t\t\t\tdocument.getElementById('song-modal').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('song-modal-inner').innerHTML = '';\n\t\t\t\t}\n\t\t\t</script></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</main><script>\n\t\t\t\t// Initialise drag-and-drop on any .sortable container (admin lineup).\n\t\t\t\thtmx.onLoad(function (content) {\n\t\t\t\t\tcontent.querySelectorAll('.sortable').forEach(function (el) {\n\t\t\t\t\t\tif (el._sortable) return;\n\t\t\t\t\t\tel._sortable = new Sortable(el, { animation: 150, handle: '.drag-handle' });\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t</script><!-- Song search modal --><div id=\"song-modal\" class=\"hidden fixed inset-0 z-50 flex items-center justify-center\" style=\"background:rgba(0,0,0,0.85)\" onclick=\"if(event.target===this)closeSongModal()\"><div id=\"song-modal-inner\" class=\"w-full max-w-md border-2 border-white bg-black p-6 mx-4\"></div></div><script>\n\t\t\t\tfunction openSongModal() { document.getElementById('song-modal').classList.remove('hidden'); }\n\t\t\t\tfunction closeSongModal() {\n\t\t\t\t\tdocument.getElementById('song-modal').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('song-modal-inner').innerHTML = '';\n\t\t\t\t}\n\t\t\t</script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+// seasonPicker is the season selector under the header, on every page. It sits
+// in the layout rather than on each page because a season is a property of the
+// whole site view, not of one table — and because a picker that appears on some
+// pages and not others reads as a bug.
+//
+// It submits back to the page you are on, so switching seasons keeps you in
+// place. Nothing is shown until a second season exists.
+func seasonPicker() templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var3 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var3 == nil {
+			templ_7745c5c3_Var3 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		if showSeasonPicker(ctx) {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"border-t border-gray-800\"><form method=\"get\" action=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var4 templ.SafeURL
+			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(seasonPickerPath(ctx)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/layout.templ`, Line: 94, Col: 49}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" class=\"mx-auto flex max-w-4xl flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2\"><label for=\"season-nav\" class=\"text-xs font-semibold uppercase tracking-widest text-gray-500\">Season</label> <select id=\"season-nav\" name=\"season\" onchange=\"this.form.submit()\" class=\"border border-white bg-black px-2 py-1 text-sm font-semibold text-white\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, s := range seasonPickerOptions(ctx) {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<option value=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var5 string
+				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(store.Itoa(s.ID))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/layout.templ`, Line: 105, Col: 38}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if s.ID == seasonPickerSelected(ctx).ID {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, ">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var6 string
+				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(seasonOptionLabel(s))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/layout.templ`, Line: 106, Col: 29}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</option>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</select> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if seasonPickerNote(ctx) != "" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<span class=\"text-xs text-gray-500\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var7 string
+				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(seasonPickerNote(ctx))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/layout.templ`, Line: 111, Col: 64}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</span>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<noscript><button type=\"submit\" class=\"border border-white px-2 py-1 text-xs uppercase\">Go</button></noscript></form></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
 		return nil
 	})

@@ -8,7 +8,7 @@ import (
 // The embedded schedule must match the season as it actually finished, so a
 // fresh database loads real results rather than a half-played snapshot.
 func TestEmbeddedScheduleMatchesTheFinishedSeason(t *testing.T) {
-	b, err := EmbeddedSchedule("2026")
+	b, err := EmbeddedSchedule("Summer 2026")
 	if err != nil {
 		t.Fatalf("EmbeddedSchedule: %v", err)
 	}

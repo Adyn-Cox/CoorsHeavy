@@ -14,7 +14,7 @@ import (
 // one it shows that game's box score in the same table, so the schedule can
 // link straight to a night's numbers.
 func (h *Handlers) StatsPage(w http.ResponseWriter, r *http.Request) {
-	season, seasons, err := h.seasonContext(r)
+	ctx, season, _, err := h.pageContext(r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -45,7 +45,7 @@ func (h *Handlers) StatsPage(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		team.Add(row.Batting)
 	}
-	_ = view.Stats(season, seasons, games, selected, rows, team).Render(r.Context(), w)
+	_ = view.Stats(season, games, selected, rows, team).Render(ctx, w)
 }
 
 // gameParam reads ?game=N, returning 0 when it is absent or unparseable.
@@ -73,7 +73,7 @@ func findGame(games []store.Game, id int64) *store.Game {
 
 // PlayerStatsPage is one player's game log plus season and career totals.
 func (h *Handlers) PlayerStatsPage(w http.ResponseWriter, r *http.Request) {
-	season, seasons, err := h.seasonContext(r)
+	ctx, season, seasons, err := h.pageContext(r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -101,7 +101,7 @@ func (h *Handlers) PlayerStatsPage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	_ = view.PlayerStats(p, season, seasons, log, seasonTotal, career, careerGames).Render(r.Context(), w)
+	_ = view.PlayerStats(p, season, seasons, log, seasonTotal, career, careerGames).Render(ctx, w)
 }
 
 // --- Stat sheet -------------------------------------------------------------
@@ -143,7 +143,7 @@ type statSheetPlayer struct {
 
 // StatSheetPage renders the transcription grid. Admin-only.
 func (h *Handlers) StatSheetPage(w http.ResponseWriter, r *http.Request) {
-	season, seasons, err := h.seasonContext(r)
+	ctx, season, _, err := h.pageContext(r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -195,7 +195,7 @@ func (h *Handlers) StatSheetPage(w http.ResponseWriter, r *http.Request) {
 
 	// templ.JSONScript encodes this into a <script type="application/json">
 	// block, escaping <, > and & so the payload can't break out of the tag.
-	_ = view.StatSheet(season, seasons, data).Render(r.Context(), w)
+	_ = view.StatSheet(season, data).Render(ctx, w)
 }
 
 // storedLines flattens a box score into the slug -> column -> value shape the

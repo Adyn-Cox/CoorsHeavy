@@ -102,8 +102,9 @@ func UniqueSlugs(names []string) []string {
 }
 
 // GameTimes are the selectable start times for a game, in display order. The
-// league only ever uses these three slots.
-var GameTimes = []string{"6:00 PM", "7:00 PM", "8:00 PM"}
+// summer league used the first three slots; the fall league runs four games a
+// night at Stazio #4 and adds the last.
+var GameTimes = []string{"6:00 PM", "7:00 PM", "8:00 PM", "9:00 PM"}
 
 // ValidGameTime reports whether t is one of the allowed start times.
 func ValidGameTime(t string) bool {
@@ -393,6 +394,9 @@ type Store interface {
 	GetSeason(ctx context.Context, id int64) (Season, error)
 	CurrentSeason(ctx context.Context) (Season, error)
 	CreateSeason(ctx context.Context, s Season) (Season, error)
+	// UpdateSeason rewrites a season's name and details in place, keeping its
+	// id and therefore every game, donation and roster spot that points at it.
+	UpdateSeason(ctx context.Context, s Season) error
 	SetCurrentSeason(ctx context.Context, id int64) error
 
 	// Players — identity, shared across seasons
@@ -424,8 +428,10 @@ type Store interface {
 	// its id — and therefore the batting lines that reference it.
 	UpdateGameSchedule(ctx context.Context, g Game) error
 	DeleteGame(ctx context.Context, id int64) error
-	// UpdateGameMatchup sets a game's start time and opponent (playoff seeding).
-	UpdateGameMatchup(ctx context.Context, id int64, gameTime, opponent string) error
+	// UpdateGameMatchup sets a playoff game's start time, opponent and
+	// home/away. All three come from the final seeding, so none of them is
+	// known when the schedule is loaded.
+	UpdateGameMatchup(ctx context.Context, id int64, gameTime, opponent string, home bool) error
 	// DeleteGamesInSeason clears one season's schedule. It deliberately has no
 	// whole-table counterpart: a wipe-everything delete would take out other
 	// seasons and cascade away their batting lines.

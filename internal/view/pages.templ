@@ -37,15 +37,15 @@ templ homeCard(title, desc, href string) {
 // Admins get drag-to-reorder, position dropdowns, attendance toggles, and a Save button.
 // The public sees a read-only batting order with an absent section below the divider.
 // When spotifyEnabled, every player row shows song search slots (public can edit).
-templ Lineup(present, absent []store.PlayerWithSongs, spotifyEnabled bool) {
+templ Lineup(season store.Season, present, absent []store.PlayerWithSongs, spotifyEnabled bool) {
 	@Layout("Lineup") {
 		<h1 class="mb-2 text-3xl font-black uppercase tracking-widest">Lineup</h1>
 		if auth.IsAdmin(ctx) {
 			<p class="mb-4 text-sm text-gray-400">Drag ⠿ to set batting order. Set positions and attendance, then click Save Lineup.</p>
-			<form id="lineup-form" method="post" action="/lineup/save">
+			<form id="lineup-form" method="post" action={ templ.SafeURL("/lineup/save?season=" + store.Itoa(season.ID)) }>
 				<div class="sortable space-y-2">
 					for i, pws := range present {
-						@PlayerRow(i, pws, spotifyEnabled)
+						@PlayerRow(season.ID, i, pws, spotifyEnabled)
 					}
 				</div>
 				<div class="my-5 flex items-center gap-3">
@@ -55,7 +55,7 @@ templ Lineup(present, absent []store.PlayerWithSongs, spotifyEnabled bool) {
 				</div>
 				<div id="absent-list" class="space-y-2 opacity-50">
 					for _, pws := range absent {
-						@PlayerRow(-1, pws, spotifyEnabled)
+						@PlayerRow(season.ID, -1, pws, spotifyEnabled)
 					}
 				</div>
 				<div class="mt-6 flex flex-wrap items-center gap-4">
@@ -74,11 +74,11 @@ templ Lineup(present, absent []store.PlayerWithSongs, spotifyEnabled bool) {
 					}
 				</div>
 			</form>
-			@AddPlayerForm()
+			@AddPlayerForm(season.ID)
 		} else {
 			<div class="space-y-2">
 				for i, pws := range present {
-					@PlayerRow(i, pws, spotifyEnabled)
+					@PlayerRow(season.ID, i, pws, spotifyEnabled)
 				}
 			</div>
 			if len(absent) > 0 {
@@ -89,7 +89,7 @@ templ Lineup(present, absent []store.PlayerWithSongs, spotifyEnabled bool) {
 				</div>
 				<div class="space-y-2 opacity-50">
 					for _, pws := range absent {
-						@PlayerRow(-1, pws, spotifyEnabled)
+						@PlayerRow(season.ID, -1, pws, spotifyEnabled)
 					}
 				</div>
 			}
@@ -100,7 +100,7 @@ templ Lineup(present, absent []store.PlayerWithSongs, spotifyEnabled bool) {
 // Schedule lists one season's games. opponents is the pick-list for playoff
 // matchups (see GameRow). The league, location and footnotes come from the
 // season row rather than being hardcoded, so every season reads correctly.
-templ Schedule(season store.Season, seasons []store.Season, games []store.Game, opponents []string) {
+templ Schedule(season store.Season, games []store.Game, opponents []string) {
 	@Layout("Schedule") {
 		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">Schedule</h1>
 		<p class="mb-4 text-sm text-gray-400">
@@ -112,7 +112,6 @@ templ Schedule(season store.Season, seasons []store.Season, games []store.Game, 
 				{ " · " + season.Location }
 			}
 		</p>
-		@SeasonSwitcher(season, seasons, "/schedule")
 		if len(games) == 0 {
 			<p class="text-gray-400">
 				No games yet for { season.Name }. Load them with
@@ -149,11 +148,10 @@ templ Schedule(season store.Season, seasons []store.Season, games []store.Game, 
 }
 
 // Beer shows each player's progress toward 2 racks, then the donations list.
-templ Beer(season store.Season, seasons []store.Season, players []store.RosterPlayer, donations []store.Donation) {
+templ Beer(season store.Season, players []store.RosterPlayer, donations []store.Donation) {
 	@Layout("Beer") {
 		<h1 class="mb-2 text-3xl font-black uppercase tracking-widest">Beer</h1>
 		<p class="mb-4 text-sm text-gray-400">Goal: 2 thirty-racks per player · { season.Name }</p>
-		@SeasonSwitcher(season, seasons, "/beer")
 		<div class="grid gap-3 sm:grid-cols-2">
 			for _, p := range players {
 				@BeerRow(season.ID, p)
@@ -211,7 +209,7 @@ templ Login(errMsg string) {
 // counting stats; nothing here is stored. The key defines 27 stats, far too
 // wide to read at once, so columns are grouped and the view toggles between
 // them.
-templ Stats(season store.Season, seasons []store.Season, games []store.Game, sel *store.Game, rows []store.PlayerBatting, team store.Batting) {
+templ Stats(season store.Season, games []store.Game, sel *store.Game, rows []store.PlayerBatting, team store.Batting) {
 	@Layout(statsTitle(sel)) {
 		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">
 			if sel != nil {
@@ -221,7 +219,6 @@ templ Stats(season store.Season, seasons []store.Season, games []store.Game, sel
 			}
 		</h1>
 		<p class="mb-4 text-sm text-gray-400">{ statsSubtitle(season, sel) }</p>
-		@SeasonSwitcher(season, seasons, "/stats")
 		@GamePicker(season, games, sel)
 		if len(rows) == 0 {
 			<p class="text-gray-400">
@@ -298,7 +295,6 @@ templ PlayerStats(p store.Player, season store.Season, seasons []store.Season, l
 	@Layout(p.Name) {
 		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">{ p.Name }</h1>
 		<p class="mb-4 text-sm text-gray-400">Game log · { season.Name }</p>
-		@SeasonSwitcher(season, seasons, "/stats/"+p.Slug)
 		<div class="mb-6 grid gap-3 sm:grid-cols-4">
 			@statTile("Avg", rate(seasonTotal.AVG()))
 			@statTile("OB%", rate(seasonTotal.OBP()))
@@ -402,14 +398,13 @@ templ statTile(label, value string) {
 //
 // It opens on whatever is already stored for a game, so editing a night that
 // has been typed is the same act as typing it the first time.
-templ StatSheet(season store.Season, seasons []store.Season, data any) {
+templ StatSheet(season store.Season, data any) {
 	@Layout("Stat Sheet") {
 		<h1 class="mb-1 text-3xl font-black uppercase tracking-widest">Stat Sheet</h1>
 		<p class="mb-4 text-sm text-gray-400">
 			{ season.Name } · type a line per player, then save. Work in progress is
 			kept in this browser until you do.
 		</p>
-		@SeasonSwitcher(season, seasons, "/statsheet")
 		@templ.JSONScript("statsheet-data", data)
 		<div id="statsheet-root" class="space-y-4"></div>
 		<script src="/static/statsheet.js"></script>
